@@ -1,0 +1,87 @@
+# Site registry: where each site's sequences live and how its world frame maps onto OSM.
+#
+#   data_dir     sequence folders, relative to $DATASET_PATH (an absolute path is used as-is)
+#   map          map name: data/maps/<map>.osm and its GeoJSON (python -m osmlocbki.osm fetch|convert --site)
+#   map_bbox     [[lat_lo, lon_lo], [lat_hi, lon_hi]]: localization candidates are clipped to it
+#   georef       how world xy becomes lat/lon, one of
+#                  {mercator: {origin: [lat, lon], rel_pos: [x, y]}}  scaled Web-Mercator
+#                  {utm_fit: <json under config/georef/>}             rigid world -> UTM fit
+#   poses        pose file in the sequence folder ({seq} = sequence name) and its format:
+#                  csv      header with an id column (`id_col`), x, y, z, qx, qy, qz, w|qw
+#                  utm_csv  header-less timestamp, x, y, z, qx, qy, qz, qw; row i = scan i
+#   scans        scan folder in the sequence folder (float32 x, y, z, intensity)
+#   labels       per-point labels, one of
+#                  {flat: <dir in the sequence folder>, label_set: <config/labels.yaml label set>}
+#                     <dir>/<scan>.bin, int32 (MCD ground truth: an ORACLE input)
+#                  {model: int|alpha, root: <dir under data/>}    <seq>/inferred_labels/<model>/
+#                     predicted_labels (int32) or multiclass_alpha (float32 per class); the model's
+#                     label set is in config/labels.yaml (models:). When the model also exported
+#                     multiclass_alpha, those scans are mapped with its class distributions.
+#   lidar_to_body  {file, key}: lidar -> body extrinsic in a calibration yaml under data_dir, when
+#                the poses are of the body
+#
+# The localizer's building points are the labels the label set maps to the common class "building"
+# (config/labels.yaml), so they follow whichever model's labels a run uses.
+
+# KTH with a segmentation network's labels (pass the model, e.g. lidarrv_mcd or lidarrv_kitti360).
+kth:
+  data_dir: datasets/mcd/kth
+  map: mcd_kth
+  map_bbox: [[59.34512, 18.05320], [59.35787, 18.09341]]
+  georef: {mercator: {origin: [59.348268650, 18.073204280], rel_pos: [64.3932532565158, 66.4832330946657]}}
+  poses: {file: pose_inW.csv, format: csv, id_col: num}
+  scans: lidar_bin/data
+  labels: {model: int}
+  lidar_to_body: {file: hhs_calib.yaml, key: body.os_sensor.T}   # the poses are of the IMU body
+
+# KTH with the dataset's own ground-truth labels (ORACLE input).
+kth_gt:
+  data_dir: datasets/mcd/kth
+  map: mcd_kth
+  map_bbox: [[59.34512, 18.05320], [59.35787, 18.09341]]
+  georef: {mercator: {origin: [59.348268650, 18.073204280], rel_pos: [64.3932532565158, 66.4832330946657]}}
+  poses: {file: pose_inW.csv, format: csv, id_col: num}
+  scans: lidar_bin/data
+  labels: {flat: gt_labels, label_set: mcd}
+  lidar_to_body: {file: hhs_calib.yaml, key: body.os_sensor.T}
+
+tuhh:
+  data_dir: datasets/mcd/tuhh
+  map: mcd_tuhh
+  map_bbox: [[53.452961, 9.954326], [53.470927, 9.984503]]
+  georef: {utm_fit: tuhh_world_to_utm.json}
+  poses: {file: pose_inW.csv, format: csv, id_col: num}
+  scans: lidar_bin/data
+  labels: {flat: gt_labels, label_set: mcd}
+  lidar_to_body: {file: hhs_calib.yaml, key: body.os_sensor.T}
+
+ntu:
+  data_dir: datasets/mcd/ntu
+  map: ntu_campus
+  map_bbox: [[1.3350, 103.6700], [1.3620, 103.6970]]
+  georef: {utm_fit: ntu_world_to_utm.json}
+  poses: {file: pose_inW.csv, format: csv, id_col: num}
+  scans: lidar_bin/data
+  labels: {model: int, root: ntu_labels}
+  lidar_to_body: {file: atv_calib.yaml, key: body.os_sensor.T}
+
+# NTU with the dataset's own ground-truth labels (ORACLE input).
+ntu_gt:
+  data_dir: datasets/mcd/ntu
+  map: ntu_campus
+  map_bbox: [[1.3350, 103.6700], [1.3620, 103.6970]]
+  georef: {utm_fit: ntu_world_to_utm.json}
+  poses: {file: pose_inW.csv, format: csv, id_col: num}
+  scans: lidar_bin/data
+  labels: {flat: gt_labels, label_set: mcd}
+  lidar_to_body: {file: atv_calib.yaml, key: body.os_sensor.T}
+
+# CU-Multi labels: only their building class is in config/labels.yaml so far.
+cu_main_campus:
+  data_dir: datasets/CU_MULTI/main_campus
+  map: cu_main
+  map_bbox: [[40.0003, -105.2788], [40.0148, -105.2583]]
+  georef: {utm_fit: cu_main_campus_utm.json}
+  poses: {file: "{seq}_main_campus_REGISTERED_poses.csv", format: utm_csv}
+  scans: lidar_bin/data
+  labels: {flat: "{seq}_main_campus_lidar_labels", label_set: cu_multi}

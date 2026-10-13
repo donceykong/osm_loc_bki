@@ -1,0 +1,23 @@
+name: osmlocbki
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  # C++ build
+  - cxx-compiler
+  - cmake>=3.24
+  - ninja
+  - eigen=3.4
+  - yaml-cpp
+  - nlohmann_json
+  - zlib
+  - pybind11
+  - scikit-build-core
+  # Python: OSM parsing, the live view
+  - numpy
+  - lxml
+  - pyyaml
+  - matplotlib
+  - pip:
+      - -e .   # builds the C++ core (CMake) and installs the osmlocbki package

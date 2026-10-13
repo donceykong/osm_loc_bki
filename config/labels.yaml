@@ -1,0 +1,93 @@
+# The common taxonomy the semantic map is built in, and how each segmentation's raw label ids map
+# onto it. Class 0 doubles as free space: it never receives evidence, and raw classes mapped to it
+# (poles, people, signs, ...) deposit nothing.
+#
+#   ground  where the class may occur relative to the ground surface: ground | nonground | both.
+#           OSM support for a class is dropped at points whose Patchwork++ verdict contradicts it.
+
+classes:
+  - {name: unlabeled,  color: [0, 0, 0],       ground: both}
+  - {name: road,       color: [128, 64, 128],  ground: ground}
+  - {name: sidewalk,   color: [232, 35, 244],  ground: ground}
+  - {name: parking,    color: [160, 170, 250], ground: ground}
+  - {name: building,   color: [255, 200, 0],   ground: nonground}
+  - {name: fence,      color: [255, 120, 50],  ground: nonground}
+  - {name: vegetation, color: [0, 175, 0],     ground: nonground}
+  - {name: vehicle,    color: [100, 150, 245], ground: nonground}
+  - {name: terrain,    color: [144, 238, 144], ground: ground}
+
+# the label set of each segmentation model's outputs
+models:
+  lidarrv_mcd: mcd
+  lidarrv_kitti360: kitti360
+  cenet_kitti360: kitti360
+
+# The localizer's building points, per label set: the ids that match OSM building outlines. A label
+# set not listed here uses every id it maps to "building" (MCD's shelters and KITTI-360's walls, bridges
+# and tunnels are buildings to the map but not OSM outlines: with them TUHH day_03 localizes ~40% worse).
+localization_buildings:
+  mcd: [2]
+  kitti360: [11]
+
+# raw label id -> common class; ids not listed map to 0
+label_sets:
+  mcd:
+    0: 5     # barrier -> fence
+    2: 4     # building
+    7: 5     # fence
+    10: 1    # lanemarking -> road
+    13: 3    # parkinglot -> parking
+    16: 1    # road
+    17: 4    # shelter -> building
+    18: 2    # sidewalk
+    24: 6    # treetrunk -> vegetation
+    25: 6    # vegetation
+    26: 7    # vehicle-dynamic
+    27: 7    # vehicle-other
+    28: 7    # vehicle-static
+    29: 8    # terrain
+  kitti360:
+    7: 1     # road
+    8: 2     # sidewalk
+    9: 3     # parking
+    10: 1    # rail track -> road
+    11: 4    # building
+    12: 4    # wall -> building
+    13: 5    # fence
+    14: 5    # guard rail -> fence
+    15: 4    # bridge -> building
+    16: 4    # tunnel -> building
+    21: 6    # vegetation
+    22: 8    # terrain
+    26: 7    # car
+    27: 7    # truck
+    28: 7    # bus
+    29: 7    # caravan
+    30: 7    # trailer
+    31: 7    # train
+    34: 4    # garage -> building
+    35: 5    # gate -> fence
+    42: 4    # unknown construction -> building
+    43: 7    # unknown vehicle
+  semkitti:
+    10: 7    # car
+    13: 7    # bus
+    16: 7    # on-rails
+    18: 7    # truck
+    20: 7    # other-vehicle
+    40: 1    # road
+    44: 3    # parking
+    48: 2    # sidewalk
+    50: 4    # building
+    51: 5    # fence
+    60: 1    # lane-marking -> road
+    70: 6    # vegetation
+    71: 6    # trunk -> vegetation
+    72: 8    # terrain
+    252: 7   # moving-car
+    256: 7   # moving-on-rails
+    257: 7   # moving-bus
+    258: 7   # moving-truck
+    259: 7   # moving-other-vehicle
+  cu_multi:   # CU-Multi dataset labels: only the building class so far
+    5: 4     # building

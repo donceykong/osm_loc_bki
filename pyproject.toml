@@ -1,0 +1,17 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "osmlocbki"
+version = "0.1.0"
+description = "Global LiDAR localization against OpenStreetMap, and OSM-BKI semantic mapping at the poses it finds"
+requires-python = ">=3.10"
+dependencies = ["numpy", "lxml", "pyyaml", "matplotlib"]
+
+[tool.scikit-build]
+cmake.version = ">=3.24"
+cmake.define = { OSMLOCBKI_TESTS = "OFF" }
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["python/osmlocbki"]
+editable.mode = "redirect"
