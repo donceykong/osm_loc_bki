@@ -45,7 +45,7 @@ target_compile_options(patchworkpp PRIVATE -w)
 add_library(osmlocbki STATIC
   src/npz.cpp src/geo.cpp src/site.cpp src/labels.cpp
   src/frontend.cpp src/chain.cpp src/backend.cpp
-  src/osm_prior.cpp src/ground.cpp src/semantic_map.cpp
+  src/osm_prior.cpp src/ground.cpp src/semantic_map.cpp src/survey.cpp
   src/pipeline.cpp)
 target_include_directories(osmlocbki PUBLIC include)
 target_link_libraries(osmlocbki PUBLIC Eigen3::Eigen OpenMP::OpenMP_CXX yaml-cpp::yaml-cpp

@@ -29,6 +29,8 @@ def main():
     ap.add_argument("--yaw-rw", type=float, default=0.0, help="simulated heading random walk, deg/sqrt(m)")
     ap.add_argument("--max-kf", type=int, default=0)
     ap.add_argument("--map-spacing", type=float, default=5.0)
+    ap.add_argument("--surface", default="", help="airborne survey .npz projected into the map, or auto "
+                    "(data/surface/<map>_epsg<zone>.npz); see config/mapping.yaml survey:")
     ap.add_argument("--building-ids", type=int, nargs="*", default=[],
                     help="override the building label ids (default: the label set's, config/labels.yaml)")
     ap.add_argument("--no-view", action="store_true")
@@ -40,7 +42,7 @@ def main():
 
     p = osmlocbki.Pipeline(a.site, a.seq, model=a.model, pose=a.pose, strength=a.strength, odometry=a.odometry,
                            scale_bias=a.scale_bias, yaw_rw=a.yaw_rw, max_kf=a.max_kf, map_spacing=a.map_spacing,
-                           building_ids=a.building_ids)
+                           building_ids=a.building_ids, surface=a.surface)
     view = LiveView(p, output="filtered" if a.pose == "filtered" else "lag" if a.pose == "lag" else "graph",
                     show=not a.no_view) if (not a.no_view or a.save) else None
     t0, n_mapped = time.time(), 0

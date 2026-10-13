@@ -159,6 +159,19 @@ void SemanticMap::insert(const MatX3f& pts, const Semantics& sem, const std::vec
   }
 }
 
+void SemanticMap::deposit(const MatX3f& pts, const MatXf& rows) {
+  if (rows.rows() != pts.rows() || rows.cols() != nc_) throw std::invalid_argument("deposit: one row of classes per point");
+  for (long i = 0; i < pts.rows(); ++i) {
+    Eigen::Vector3f x = pts.row(i).transpose();
+    if (!x.allFinite() || !(rows.row(i).sum() > 0)) continue;
+    int64_t key = key_of(x);
+    auto& ev = blocks_[key];
+    if (ev.empty()) ev.assign(leaf_offset_.size() * nc_, 0.0f);
+    float* e = ev.data() + leaf_of(x, key) * nc_;
+    for (int c = 0; c < nc_; ++c) e[c] += rows(i, c);
+  }
+}
+
 std::vector<int> SemanticMap::classify(const MatX3f& pts) const {
   std::vector<int> out(pts.rows(), 0);
   for (long i = 0; i < pts.rows(); ++i) {

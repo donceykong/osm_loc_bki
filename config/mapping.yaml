@@ -27,3 +27,9 @@ ground:                  # Patchwork++ verdicts gate OSM support (config/labels.
   min_range: 0.0
   max_range: 200.0
   reflected_noise_removal: false
+
+survey:                  # an airborne survey (DSM/DEM) in the loop: run.py --surface FILE|auto
+  weight: 0.1            # a survey voxel's evidence (times OSM's support), in LiDAR points: LiDAR wins
+  radius: 50.0           # the survey is projected within this of each mapped pose
+  ground_above_dem: 0.4  # survey points lower than this over the terrain model are ground
+  z_offset: auto         # survey height -> map z: auto (from each scan's ground points) or metres

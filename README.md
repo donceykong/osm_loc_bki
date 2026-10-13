@@ -58,6 +58,7 @@ python demos/run.py --site tuhh --seq tuhh_day_03 --odometry drifting --scale-bi
 | `--max-kf N`, `--map-spacing M` | stop after N keyframes; metres between mapped scans (default 5) |
 | `--eval DIR`, `--label-set SET` | score the map against `<seq>/DIR` labels (label set, default `mcd`) |
 | `--no-view`, `--save PNG`, `--draw-every N` | headless; save the final view; keyframes between redraws |
+| `--surface FILE\|auto` | project an airborne survey (DSM/DEM) into the map around each mapped pose (see below) |
 | `--building-ids ...` | override the building label ids (normally from the label set) |
 
 The view shows OSM, ground truth, the estimate and the last mapped scan (left), and the semantic map
@@ -79,7 +80,19 @@ p.trajectory("lag"), p.voxels()
   its building ids for localization (`localization_buildings:`) and which models use it (`models:`).
   A new model only needs a `models:` entry.
 - `config/mapping.yaml`: mapping and OSM settings, including `strength` and the OSM confusion matrix
-  (`osm_confusion/mcd_hand.yaml` by default).
+  (`osm_confusion/mcd_hand.yaml` by default), and the airborne survey's (`survey:`).
+
+**Airborne survey (optional).** With `--surface`, each mapped scan also projects the survey within
+50 m into the map: every survey voxel once, labelled by OSM gated by its height over the survey's
+terrain (ground or not), at a tenth of a LiDAR point's weight so LiDAR wins where it sees the same
+place. This fills roofs, canopy and gaps the vehicle never sees. `auto` reads
+`data/surface/<map>_epsg<zone>.npz` (KTH and CU main campus exist; they are built from LAS/LAZ tiles
+or DSM/DEM rasters by osm_localization: `python -m osmloc.dsm --site S`, then
+`osmloc build-surface --site S`). The height datum offset is estimated from each scan's ground points.
+
+```bash
+python demos/run.py --site kth --seq kth_day_09 --model lidarrv_mcd --surface auto
+```
 
 ## Tests
 

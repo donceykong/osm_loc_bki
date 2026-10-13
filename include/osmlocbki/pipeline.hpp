@@ -9,9 +9,16 @@
 //          filtered  the filtered pose, at once (online, a little noisier)
 //          gt        ground truth (an oracle, to compare against)
 // Locked: at least lock_m of path behind, and the rigid and graph outputs agree.
+//
+// With an airborne survey (`surface`), each mapped keyframe also projects the survey within
+// survey.radius of its pose into the map, every voxel once: a voxel gets survey.weight times OSM's
+// class support, gated by the voxel's ground verdict (its height over the survey's terrain), so
+// LiDAR evidence outweighs it wherever the vehicle sees the same place.
 #pragma once
 
+#include <limits>
 #include <memory>
+#include <unordered_set>
 #include <optional>
 #include <string>
 #include <vector>
@@ -20,6 +27,7 @@
 #include "osmlocbki/ground.hpp"
 #include "osmlocbki/semantic_map.hpp"
 #include "osmlocbki/site.hpp"
+#include "osmlocbki/survey.hpp"
 
 namespace olb {
 
@@ -42,6 +50,7 @@ struct PipelineConfig {
   double lock_m = 100.0;
   std::string mapping = "mapping.yaml";  // under config/
   double strength = -1;           // OSM strength; < 0: the mapping config's
+  std::string surface;            // airborne survey .npz ("auto": data/surface/<map>_epsg<zone>.npz); empty: none
 };
 
 // a mapped keyframe: its scan in the map frame and the classes its points came in with
@@ -81,6 +90,8 @@ class Pipeline {
   std::vector<int> classify_keyframe(long t) const;
   std::string status() const;
   double map_seconds() const { return map_s_; }
+  long survey_voxels() const { return static_cast<long>(survey_done_.size()); }  // projected so far
+  double survey_offset() const { return dz_; }  // survey height -> map z (NaN until estimated)
 
  private:
   struct Scan {
@@ -94,6 +105,8 @@ class Pipeline {
   MatX3f place(const MatX3f& levelled, const Vec2& xy, double psi, long t) const;
   void insert(long t, const Vec2& xy, double psi);
   void map_ready(const Estimate& e);
+  void project_survey(const Vec2& xy, const MatX3f& pts, const std::vector<int8_t>& ground);
+  std::string survey_status() const;
 
   PipelineConfig c_;
   Site site_;
@@ -118,6 +131,16 @@ class Pipeline {
   std::vector<long> map_kf_, mapped_;
   MappedScan last_;
   double map_s_ = 0;
+  // the airborne survey
+  struct SurveyParams {
+    double weight = 0.1, radius = 50.0, ground_above_dem = 0.4;
+    bool auto_offset = true;
+    double offset = 0.0;
+  } sp_;
+  std::unique_ptr<Survey> survey_;
+  std::unordered_set<int64_t> survey_done_;  // voxels already projected
+  std::vector<double> dz_scans_;              // per-scan offset estimates (auto)
+  double dz_ = std::numeric_limits<double>::quiet_NaN();
 };
 
 }  // namespace olb

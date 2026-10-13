@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 
 namespace olb {
@@ -79,6 +80,20 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.site)) {
     read(g, "sensor_height", gp.sensor_height), read(g, "min_range", gp.min_range), read(g, "max_range", gp.max_range);
     read(g, "reflected_noise_removal", gp.reflected_noise_removal);
     ground_ = std::make_unique<GroundSegmenter>(gp);
+  }
+  if (!c.surface.empty()) {
+    std::string path = c.surface;
+    if (path == "auto") path = data_dir() + "/surface/" + site_.map + "_epsg" + std::to_string(db_->epsg) + ".npz";
+    if (!std::filesystem::exists(path)) throw std::runtime_error("no survey model at " + path);
+    if (!prior_) throw std::runtime_error("the survey is labelled by OSM: the mapping config needs a confusion matrix");
+    const YAML::Node v = y["survey"];
+    read(v, "weight", sp_.weight), read(v, "radius", sp_.radius), read(v, "ground_above_dem", sp_.ground_above_dem);
+    if (v && v["z_offset"] && v["z_offset"].as<std::string>() != "auto") sp_.auto_offset = false, dz_ = v["z_offset"].as<double>();
+    if (sp_.auto_offset && !ground_) throw std::runtime_error("survey z_offset auto needs ground segmentation (or set z_offset)");
+    survey_ = std::make_unique<Survey>(path);
+    if (survey_->epsg() != db_->epsg)
+      throw std::runtime_error(path + " is in EPSG:" + std::to_string(survey_->epsg()) + ", the map in EPSG:" + std::to_string(db_->epsg));
+    std::fprintf(stderr, "  survey %s: within %g m of each mapped pose, weight %g\n", path.c_str(), sp_.radius, sp_.weight);
   }
 
   // mapping keyframes: map_spacing apart (3D), among the scans with class distributions
@@ -175,6 +190,7 @@ void Pipeline::insert(long t, const Vec2& xy, double psi) {
   MatX3f pts = place(s.levelled, xy, psi, t);
   const Vec2 at = xy - map_->utm_origin();
   map_->insert(pts, s.sem, ground, Vec3(at[0], at[1], seq_->lidar_world(t, 2)));
+  if (survey_) project_survey(xy, pts, ground);
   mapped_.push_back(t);
   last_.t = t, last_.scan_id = seq_->scan_ids[t], last_.xy = xy, last_.psi = psi;
   last_.points = std::move(pts);
@@ -184,6 +200,52 @@ void Pipeline::insert(long t, const Vec2& xy, double psi) {
     last_.cls[i] = s.sem.probs.row(i).maxCoeff(&c) > 0 ? static_cast<int>(c) : 0;
   }
   map_s_ += sw.seconds();
+}
+
+void Pipeline::project_survey(const Vec2& xy, const MatX3f& pts, const std::vector<int8_t>& ground) {
+  const Vec2 o = map_->utm_origin();
+  // the survey's height datum: where this scan's ground points sit over the survey's terrain
+  if (sp_.auto_offset) {
+    std::vector<double> d;
+    for (long i = 0; i < pts.rows(); ++i)
+      if (ground[i] == 1) d.push_back(pts(i, 2) - survey_->terrain(Vec2(pts(i, 0), pts(i, 1)) + o));
+    if (d.size() > 100) {
+      std::nth_element(d.begin(), d.begin() + d.size() / 2, d.end());
+      dz_scans_.push_back(d[d.size() / 2]);
+      std::vector<double> m = dz_scans_;
+      std::nth_element(m.begin(), m.begin() + m.size() / 2, m.end());
+      dz_ = m[m.size() / 2];
+    }
+  }
+  if (std::isnan(dz_)) return;
+  // the survey's points around the pose, snapped to voxels not projected yet
+  const MatX3 sv = survey_->crop(xy, sp_.radius);
+  const double res = map_->params().resolution;
+  std::vector<long> fresh;
+  for (long i = 0; i < sv.rows(); ++i) {
+    Vec3 x(sv(i, 0) - o[0], sv(i, 1) - o[1], sv(i, 2) + dz_);
+    const int64_t k[3] = {static_cast<int64_t>(std::floor(x[0] / res)), static_cast<int64_t>(std::floor(x[1] / res)),
+                          static_cast<int64_t>(std::floor(x[2] / res))};
+    if (survey_done_.insert(((k[0] + (1 << 20)) << 42) | ((k[1] + (1 << 20)) << 21) | (k[2] + (1 << 20))).second)
+      fresh.push_back(i);
+  }
+  MatX3f at(fresh.size(), 3);
+  MatXf rows(fresh.size(), tax_.size());
+  for (size_t j = 0; j < fresh.size(); ++j) {
+    const long i = fresh[j];
+    const Vec2 u(sv(i, 0), sv(i, 1));
+    at.row(j) << static_cast<float>(u[0] - o[0]), static_cast<float>(u[1] - o[1]), static_cast<float>(sv(i, 2) + dz_);
+    const int g = sv(i, 2) - survey_->terrain(u) < sp_.ground_above_dem ? 1 : 0;
+    prior_->project(u, g, rows.row(j).data());
+  }
+  map_->deposit(at, static_cast<float>(sp_.weight) * rows);
+}
+
+std::string Pipeline::survey_status() const {
+  if (!survey_) return "";
+  char b[96];
+  std::snprintf(b, sizeof b, ", survey %ld voxels (datum %+.2f m)", survey_voxels(), dz_);
+  return b;
 }
 
 std::vector<int> Pipeline::classify_keyframe(long t) const {
@@ -203,9 +265,9 @@ std::string Pipeline::status() const {
   const auto& tm = loc_->timing;
   std::snprintf(b, sizeof b,
                 "keyframe %ld / %ld, %.0f m%s | error: filtered %.1f m, graph %.1f m, rigid %.1f m | "
-                "mapped %zu / %zu keyframes (pose %s) | ms per keyframe: match %.0f, back-end %.0f; per mapped scan %.0f",
+                "mapped %zu / %zu keyframes (pose %s)%s | ms per keyframe: match %.0f, back-end %.0f; per mapped scan %.0f",
                 t_ + 1, T_, d[t_], locked_ ? ", locked" : ", not locked", err(FILTERED), err(GRAPH), err(RIGID),
-                mapped_.size(), map_kf_.size(), c_.pose.c_str(), tm.match / (t_ + 1) * 1e3,
+                mapped_.size(), map_kf_.size(), c_.pose.c_str(), survey_status().c_str(), tm.match / (t_ + 1) * 1e3,
                 (tm.rigid + tm.graph) / (t_ + 1) * 1e3, mapped_.empty() ? 0.0 : map_s_ / mapped_.size() * 1e3);
   return b;
 }

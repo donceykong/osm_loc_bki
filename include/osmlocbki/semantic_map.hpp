@@ -42,6 +42,9 @@ class SemanticMap {
   // one scan in the map frame: points (N, 3), their semantics, Patchwork++ verdicts (N: 1 ground,
   // 0 non-ground, -1 unknown; empty = none) and the sensor origin
   void insert(const MatX3f& pts, const Semantics& sem, const std::vector<int8_t>& ground, const Vec3& origin);
+  // add evidence rows (N, C) straight to the voxels holding the points (N, 3), no kernel: how
+  // evidence from outside the scans (an airborne survey) enters the map
+  void deposit(const MatX3f& pts, const MatXf& rows);
   // the class of the voxel holding each point (0: free or never observed)
   std::vector<int> classify(const MatX3f& pts) const;
   // every voxel with evidence (within `box`, map frame, if given): centre, class, that class's
@@ -49,6 +52,7 @@ class SemanticMap {
   void voxels(MatX3f& xyz, std::vector<int>& cls, std::vector<float>& prob, std::vector<float>& mass,
               const Box* box = nullptr) const;
   const Vec2& utm_origin() const { return origin_utm_; }
+  const MapParams& params() const { return p_; }
 
  private:
   struct Train {

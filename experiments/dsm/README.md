@@ -30,9 +30,14 @@ Writes `out/<site>_<seq>_survey.png` (six top-down panels) and `out/<site>_<seq>
 - **LiDAR labels reaching the survey** (nearest LiDAR voxel within 2 voxels) cover 65% of survey
   voxels; the rest (mostly roofs and far canopy) need OSM + the ground verdict.
 
+## In the loop
+
+`demos/run.py --surface auto` (see the main README) projects the survey online with the DEM ground
+verdict, the better of the two: KTH day_09 gets 414k survey voxels, the datum estimate settles at
+-0.04 m (here -0.06 m offline), and the map's score on the LiDAR scans is unchanged (mIoU 0.381 with
+and without; LiDAR outweighs the survey where both are), at ~55 ms more per mapped scan.
+
 ## Next
 
-- Insert survey voxels into the map as low-weight evidence (OSM + DEM ground deposit, so LiDAR
-  overrides them), instead of a separate layer.
 - Drop the vehicle class from OSM support at non-ground survey voxels over parking (canopy).
 - CU main campus has a survey too (`data/surface/cu_main_epsg32613.npz`) but no mapped label set yet.

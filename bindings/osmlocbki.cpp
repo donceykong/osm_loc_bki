@@ -21,14 +21,14 @@ std::unique_ptr<Pipeline> make_pipeline(const std::string& site, const std::stri
                                         const std::string& pose, bool map, double strength, const std::string& odometry,
                                         double scale_bias, double yaw_rw, unsigned seed, long max_kf, double spacing,
                                         double map_spacing, double lock_m, double lag_m, std::vector<int> building_ids,
-                                        const std::string& mapping) {
+                                        const std::string& mapping, const std::string& surface) {
   PipelineConfig c;
   c.site = site, c.seq = seq, c.model = model, c.pose = pose, c.map = map, c.strength = strength;
   if (odometry != "near_exact" && odometry != "drifting") throw std::invalid_argument("odometry: near_exact or drifting");
   c.graph = odometry == "drifting" ? GraphParams::drifting() : GraphParams();
   c.odometry.scale_bias = scale_bias, c.odometry.yaw_rw = yaw_rw, c.odometry.seed = seed;
   c.max_kf = max_kf, c.spacing = spacing, c.map_spacing = map_spacing, c.lock_m = lock_m, c.lag_m = lag_m;
-  c.building_ids = std::move(building_ids), c.mapping = mapping;
+  c.building_ids = std::move(building_ids), c.mapping = mapping, c.surface = surface;
   return std::make_unique<Pipeline>(c);
 }
 
@@ -125,10 +125,12 @@ PYBIND11_MODULE(_osmlocbki, m) {
            py::arg("map") = true, py::arg("strength") = -1.0, py::arg("odometry") = "near_exact",
            py::arg("scale_bias") = 0.0, py::arg("yaw_rw") = 0.0, py::arg("seed") = 1u, py::arg("max_kf") = 0,
            py::arg("spacing") = 1.0, py::arg("map_spacing") = 5.0, py::arg("lock_m") = 100.0, py::arg("lag_m") = 60.0,
-           py::arg("building_ids") = std::vector<int>{}, py::arg("mapping") = "mapping.yaml",
+           py::arg("building_ids") = std::vector<int>{}, py::arg("mapping") = "mapping.yaml", py::arg("surface") = "",
            "Localize a sequence keyframe by keyframe and map it with OSM-BKI (see pipeline.hpp).\n"
            "pose: lag | filtered | gt; strength: OSM strength (< 0: config/mapping.yaml's); odometry: near_exact or\n"
-           "drifting graph preset, with simulated drift scale_bias (fraction) and yaw_rw (deg / sqrt(m)).")
+           "drifting graph preset, with simulated drift scale_bias (fraction) and yaw_rw (deg / sqrt(m)).\n"
+           "surface: an airborne survey .npz projected into the map around each mapped pose ('auto':\n"
+           "data/surface/<map>_epsg<zone>.npz).")
       .def("step", &Pipeline::step, py::call_guard<py::gil_scoped_release>(),
            "Localize the next keyframe and map what is ready -> False when done.")
       .def("finish", &Pipeline::finish, py::call_guard<py::gil_scoped_release>(), "Settle the lag and map what it settles.")
@@ -168,5 +170,7 @@ PYBIND11_MODULE(_osmlocbki, m) {
            "Keyframe t's scan at its ground-truth pose, classified by the map (one class per raw point).")
       .def("osm", &osm_layers, "The OSM map in UTM: buildings, holes, features [(class, area|line|point, (N, 2))].")
       .def("taxonomy", &taxonomy, "The common classes' names and colours.")
-      .def_property_readonly("map_seconds", &Pipeline::map_seconds);
+      .def_property_readonly("map_seconds", &Pipeline::map_seconds)
+      .def_property_readonly("survey_voxels", &Pipeline::survey_voxels, "Survey voxels projected into the map so far.")
+      .def_property_readonly("survey_offset", &Pipeline::survey_offset, "Survey height -> map z (NaN until estimated).");
 }
