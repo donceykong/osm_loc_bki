@@ -1,0 +1,23 @@
+# build output (cmake, pip / scikit-build)
+build/
+dist/
+*.egg-info/
+*.so
+*.whl
+
+# caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+.ipynb_checkpoints/
+
+# generated data: databases, scan descriptors and raw OSM extracts are rebuilt / refetched
+data/*.npz
+data/maps/*.osm
+
+# scratch configs and editor / OS files
+config/_tmp_*
+.vscode/
+.idea/
+.DS_Store

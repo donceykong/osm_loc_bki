@@ -29,7 +29,8 @@ The env name comes from the first line of `environment.yaml`; to use another, pa
 the packages listed in `environment.yaml`): `conda activate my_env && pip install -e .`.
 
 `pip install -e .` builds the C++ core with CMake and installs the `osmlocbki` package. After
-changing C++ code, run `pip install -e .` again.
+changing C++ code, or after moving or copying the repository, run `pip install -e .` again (an
+editable install points at the checkout it was installed from; `pip show -f osmlocbki` shows which).
 
 ### 2. Point at the datasets
 
