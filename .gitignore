@@ -21,3 +21,9 @@ config/_tmp_*
 .vscode/
 .idea/
 .DS_Store
+
+# airborne-LiDAR surface models (dsm-occupancy experiments)
+data/surface/
+
+# experiment outputs
+experiments/*/out/

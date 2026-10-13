@@ -71,6 +71,7 @@ class Pipeline {
   const OsmMap& osm() const { return osm_; }
   const Taxonomy& taxonomy() const { return tax_; }
   const SemanticMap* semantic_map() const { return map_.get(); }
+  const OsmPrior* osm_prior() const { return prior_.get(); }  // null without a confusion matrix
   const MatX2& gt() const { return gt_; }  // the LiDAR's ground truth, UTM
   const std::vector<double>& gt_psi() const { return gt_psi_; }
   const std::vector<long>& map_keyframes() const { return map_kf_; }  // the keyframes to map
@@ -110,6 +111,7 @@ class Pipeline {
   Taxonomy tax_;
   std::vector<int> to_common_;
   bool alpha_ = false;
+  std::shared_ptr<const OsmPrior> prior_;
   std::unique_ptr<SemanticMap> map_;
   std::unique_ptr<GroundSegmenter> ground_;
   std::vector<char> is_map_kf_;

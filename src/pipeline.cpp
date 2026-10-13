@@ -71,10 +71,9 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.site)) {
       op.width[cls] = kv.second.as<double>();
     }
   std::string cm = o && o["confusion"] ? o["confusion"].as<std::string>() : "";
-  std::shared_ptr<const OsmPrior> prior;
   if (!cm.empty())
-    prior = std::make_shared<OsmPrior>(osm_, op, OsmPrior::load_confusion(config_dir() + "/" + cm, tax_.size()), tax_.roles);
-  map_ = std::make_unique<SemanticMap>(tax_.size(), mp, prior, map_origin(*db_));
+    prior_ = std::make_shared<OsmPrior>(osm_, op, OsmPrior::load_confusion(config_dir() + "/" + cm, tax_.size()), tax_.roles);
+  map_ = std::make_unique<SemanticMap>(tax_.size(), mp, prior_, map_origin(*db_));
   if (g && g["enabled"] && g["enabled"].as<bool>()) {
     GroundParams gp;
     read(g, "sensor_height", gp.sensor_height), read(g, "min_range", gp.min_range), read(g, "max_range", gp.max_range);

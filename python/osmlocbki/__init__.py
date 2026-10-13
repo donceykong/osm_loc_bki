@@ -17,6 +17,6 @@ _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if os.path.isdir(os.path.join(_root, "config")):
     os.environ.setdefault("OSMLOCBKI_ROOT", _root)
 
-from ._osmlocbki import Pipeline, Site, config_dir, data_dir, label_mapping, sites  # noqa: E402
+from ._osmlocbki import Pipeline, Site, config_dir, data_dir, label_mapping, segment_ground, sites  # noqa: E402
 
-__all__ = ["Pipeline", "Site", "config_dir", "data_dir", "label_mapping", "sites"]
+__all__ = ["Pipeline", "Site", "config_dir", "data_dir", "label_mapping", "segment_ground", "sites"]

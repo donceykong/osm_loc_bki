@@ -73,6 +73,17 @@ py::dict taxonomy(const Pipeline& p) {
   return py::dict(py::arg("names") = t.names, py::arg("colors") = colors);
 }
 
+// OSM's gated class support at UTM points (N, 2) with ground verdicts (N: 1, 0, -1) -> (N, C)
+MatXf osm_support(const Pipeline& p, const MatX2& xy, const std::vector<int8_t>& ground) {
+  if (!p.osm_prior()) throw std::logic_error("no OSM prior: the mapping config has no confusion matrix");
+  if (static_cast<long>(ground.size()) != xy.rows()) throw std::invalid_argument("one ground verdict per point");
+  MatXf s(xy.rows(), p.osm_prior()->num_class());
+  py::gil_scoped_release free;
+#pragma omp parallel for schedule(static)
+  for (long i = 0; i < xy.rows(); ++i) p.osm_prior()->project(xy.row(i).transpose(), ground[i], s.row(i).data());
+  return s;
+}
+
 MatX2 hits(const Pipeline& p, long t) {
   const auto& b = p.localizer().buf();
   MatX2 h(b.k, 2);
@@ -88,6 +99,16 @@ PYBIND11_MODULE(_osmlocbki, m) {
   m.def("sites", &Site::names, "Site names in config/sites.yaml.");
   m.def("data_dir", &data_dir, "Where generated files go (data/ or $OSMLOCBKI_DATA).");
   m.def("config_dir", &config_dir, "The repository's config/.");
+  m.def(
+      "segment_ground",
+      [](const MatXf& pts, double sensor_height, double min_range, double max_range) {
+        GroundParams g;
+        g.sensor_height = sensor_height, g.min_range = min_range, g.max_range = max_range;
+        py::gil_scoped_release free;
+        return GroundSegmenter(g).segment(pts);
+      },
+      py::arg("points"), py::arg("sensor_height") = 1.73, py::arg("min_range") = 0.0, py::arg("max_range") = 200.0,
+      "Patchwork++ on one levelled cloud (N, 3), sensor at the origin -> per point 1 ground, 0 non-ground, -1 unknown.");
   m.def("label_mapping", [](const std::string& set) { return Taxonomy::load().mapping(set); }, py::arg("label_set"),
         "Raw label id -> common class (index = raw id) for a label set of config/labels.yaml.");
 
@@ -135,6 +156,14 @@ PYBIND11_MODULE(_osmlocbki, m) {
       .def("voxels", &voxels, py::arg("box") = std::nullopt,
            "Voxels with evidence (within box = (xmin, ymin, xmax, ymax), map frame): xyz (map frame), cls, prob,\n"
            "mass, origin (UTM of the map frame).")
+      .def("classify",
+           [](const Pipeline& p, const MatX3f& pts) {
+             if (!p.semantic_map()) throw std::logic_error("no map: the pipeline runs with map=False");
+             return p.semantic_map()->classify(pts);
+           },
+           py::arg("points"), "The class of the voxel holding each point (N, 3), map frame (0: free or unobserved).")
+      .def("osm_support", &osm_support, py::arg("xy"), py::arg("ground"),
+           "OSM's ground-gated support per class at UTM points (N, 2), ground verdicts (N,) -> (N, C).")
       .def("classify_keyframe", &Pipeline::classify_keyframe, py::arg("t"),
            "Keyframe t's scan at its ground-truth pose, classified by the map (one class per raw point).")
       .def("osm", &osm_layers, "The OSM map in UTM: buildings, holes, features [(class, area|line|point, (N, 2))].")
