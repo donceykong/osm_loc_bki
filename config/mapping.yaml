@@ -13,7 +13,10 @@ map:
 osm:
   strength: 0.1          # lambda: 0.1 for an in-domain model (lidarrv_mcd), ~2 under domain shift
   decay_m: 2.0           # support falls from 1 at a shape's edge to 0 this far outside it
-  confusion: osm_confusion/mcd_tuned.yaml
+  # P(class | OSM class). mcd_hand maps OSM buildings to building only; mcd_tuned (fitted on TUHH)
+  # gives them 42% fence, which the boost turns into fences along walls at high strength (KTH day_09,
+  # lidarrv_kitti360, strength 2: mIoU 0.393 with mcd_hand, 0.365 with mcd_tuned)
+  confusion: osm_confusion/mcd_hand.yaml
   # band width (m) of OSM lines and points without a width tag; a tagged width wins, and major
   # roads take a per-highway default when converted (python/osmlocbki/osm.py)
   widths: {roads: 4.0, sidewalks: 2.0, cycleways: 2.0, fences: 0.6, trees: 10.0}
