@@ -56,7 +56,14 @@ class SemanticMap {
               const Box* box = nullptr) const;
   // the surface mesh coloured by class (nvblox backend), as PLY
   void save_mesh(const std::string& path, const std::vector<std::array<uint8_t, 3>>& colors) const;
+  void mesh(MatX3f& vertices, MatX3i& triangles, MatX3u8& rgb, const std::vector<std::array<uint8_t, 3>>& colors,
+            bool full) const {
+    store_->mesh(vertices, triangles, rgb, colors, full);
+  }
   bool has_geometry() const { return store_->has_geometry(); }
+  std::string memory() const { return store_->memory(); }
+  // a scan's geometry only (map frame, sensor origin): the nvblox backend's TSDF
+  void observe(const MatX3f& pts, const Vec3& origin) { store_->observe(pts, origin.cast<float>()); }
   const Vec2& utm_origin() const { return origin_utm_; }
   const MapParams& params() const { return p_; }
 

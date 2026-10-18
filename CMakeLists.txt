@@ -31,7 +31,7 @@ option(OSMLOCBKI_PYTHON "Build the Python module" ON)
 option(OSMLOCBKI_TESTS "Build the tests" ON)
 set(OSMLOCBKI_NVBLOX AUTO CACHE STRING "The nvblox (GPU) map backend: AUTO (when CUDA and nvblox are found), ON, OFF")
 set(NVBLOX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../nvblox" CACHE PATH "An nvblox checkout (github.com/nvidia-isaac/nvblox)")
-set(OSMLOCBKI_MAX_CLASSES 12 CACHE STRING "Classes an nvblox semantic voxel holds")
+set(OSMLOCBKI_MAX_CLASSES 9 CACHE STRING "Classes an nvblox semantic voxel holds (config/labels.yaml has 9)")
 
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(OpenMP REQUIRED)

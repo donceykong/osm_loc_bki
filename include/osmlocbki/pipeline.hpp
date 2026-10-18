@@ -102,9 +102,12 @@ class Pipeline {
     std::vector<long> index;  // into the raw scan
     long raw = 0;             // points in the raw scan
   };
-  Scan load(long t) const;
+  Scan load(long t, bool semantics = true) const;
   MatX3f place(const MatX3f& levelled, const Vec2& xy, double psi, long t) const;
   void insert(long t, const Vec2& xy, double psi);
+  // a settled keyframe: mapped if it is a mapping keyframe, else its geometry alone when the map has
+  // geometry and takes every keyframe's (nvblox every_keyframe)
+  void place_keyframe(long t, const Vec2& xy, double psi);
   void map_ready(const Estimate& e);
   void project_survey(const Vec2& xy, const MatX3f& pts, const std::vector<int8_t>& ground);
   std::string survey_status() const;
@@ -131,7 +134,7 @@ class Pipeline {
   std::vector<char> is_map_kf_;
   std::vector<long> map_kf_, mapped_;
   MappedScan last_;
-  double map_s_ = 0;
+  double map_s_ = 0, geo_s_ = 0;  // mapping, and geometry-only keyframes
   // the airborne survey
   struct SurveyParams {
     double weight = 0.1, radius = 50.0, ground_above_dem = 0.4;

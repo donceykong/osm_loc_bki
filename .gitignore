@@ -27,3 +27,4 @@ data/surface/
 
 # experiment outputs
 experiments/*/out/
+*.ply

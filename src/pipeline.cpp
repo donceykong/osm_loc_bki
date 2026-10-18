@@ -69,7 +69,8 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.site)) {
     NvbloxParams& nv = mp.nvblox;
     read(v, "azimuth", nv.azimuth), read(v, "elevation", nv.elevation), read(v, "max_range", nv.max_range);
     read(v, "truncation_vox", nv.truncation_vox), read(v, "free_space_mask", nv.free_space_mask);
-    read(v, "free_distance", nv.free_distance);
+    read(v, "free_distance", nv.free_distance), read(v, "interp_max_difference_vox", nv.interp_max_difference_vox);
+    read(v, "nearest_max_dist_vox", nv.nearest_max_dist_vox), read(v, "every_keyframe", nv.every_keyframe);
     if (v["elevation_deg"]) nv.min_elevation_deg = v["elevation_deg"][0].as<double>(), nv.max_elevation_deg = v["elevation_deg"][1].as<double>();
   }
   OsmParams op;
@@ -131,27 +132,37 @@ bool Pipeline::step() {
 
 void Pipeline::map_ready(const Estimate& e) {
   if (c_.pose == "gt") {
-    if (is_map_kf_[e.t]) insert(e.t, gt_.row(e.t).transpose(), gt_psi_[e.t]);
+    place_keyframe(e.t, gt_.row(e.t).transpose(), gt_psi_[e.t]);
   } else if (c_.pose == "filtered") {
-    if (is_map_kf_[e.t] && locked_) insert(e.t, e.xy[FILTERED], e.psi[FILTERED]);
+    if (locked_) place_keyframe(e.t, e.xy[FILTERED], e.psi[FILTERED]);
   } else {
     for (int u : e.lagged)
-      if (is_map_kf_[u] && locked_) insert(u, loc_->xy(LAG, u), loc_->heading(LAG)[u]);
+      if (locked_) place_keyframe(u, loc_->xy(LAG, u), loc_->heading(LAG)[u]);
   }
+}
+
+void Pipeline::place_keyframe(long t, const Vec2& xy, double psi) {
+  if (is_map_kf_[t]) return insert(t, xy, psi);
+  if (!map_->has_geometry() || !map_->params().nvblox.every_keyframe) return;
+  Stopwatch sw;
+  const Vec2 at = xy - map_->utm_origin();
+  map_->observe(place(load(t, false).levelled, xy, psi, t), Vec3(at[0], at[1], seq_->lidar_world(t, 2)));
+  geo_s_ += sw.seconds();
 }
 
 void Pipeline::finish() {
   if (c_.lag_m <= 0) return;
   for (int u : loc_->finish_lag())
-    if (map_ && c_.pose == "lag" && is_map_kf_[u] && locked_) insert(u, loc_->xy(LAG, u), loc_->heading(LAG)[u]);
+    if (map_ && c_.pose == "lag" && locked_) place_keyframe(u, loc_->xy(LAG, u), loc_->heading(LAG)[u]);
 }
 
-Pipeline::Scan Pipeline::load(long t) const {
+Pipeline::Scan Pipeline::load(long t, bool semantics) const {
   const long id = seq_->scan_ids[t];
   auto pc = site_.load_scan(c_.seq, id);
   const long n = static_cast<long>(pc.size() / 4);
   Semantics all;
-  if (alpha_) {
+  if (!semantics) {
+  } else if (alpha_) {
     auto a = site_.load_alpha(c_.seq, id, c_.model);
     all = from_alpha(a.data(), n, static_cast<int>(a.size() / n), to_common_, tax_.size());
   } else {
@@ -166,14 +177,13 @@ Pipeline::Scan Pipeline::load(long t) const {
   const long m = static_cast<long>(s.index.size());
   const Eigen::Matrix3f R = seq_->level[t].cast<float>();
   s.levelled.resize(m, 3);
-  s.sem.probs.resize(m, tax_.size());
-  s.sem.vacuity.resize(m);
+  s.sem.probs.resize(semantics ? m : 0, tax_.size());
+  s.sem.vacuity.resize(semantics ? m : 0);
   s.intensity.resize(m);
   for (long k = 0; k < m; ++k) {
     long i = s.index[k];
     s.levelled.row(k) = (R * Eigen::Vector3f(pc[4 * i], pc[4 * i + 1], pc[4 * i + 2])).transpose();
-    s.sem.probs.row(k) = all.probs.row(i);
-    s.sem.vacuity[k] = all.vacuity[i];
+    if (semantics) s.sem.probs.row(k) = all.probs.row(i), s.sem.vacuity[k] = all.vacuity[i];
     s.intensity[k] = pc[4 * i + 3];
   }
   return s;
@@ -272,12 +282,14 @@ std::string Pipeline::status() const {
   const auto& d = loc_->buf().dist;
   auto err = [&](Output o) { return (loc_->xy(o, static_cast<int>(t_)) - gt_.row(t_).transpose()).norm(); };
   const auto& tm = loc_->timing;
+  char geo[48] = "";
+  if (geo_s_ > 0) std::snprintf(geo, sizeof geo, ", geometry %.0f", geo_s_ / (t_ + 1) * 1e3);
   std::snprintf(b, sizeof b,
                 "keyframe %ld / %ld, %.0f m%s | error: filtered %.1f m, graph %.1f m, rigid %.1f m | "
-                "mapped %zu / %zu keyframes (pose %s)%s | ms per keyframe: match %.0f, back-end %.0f; per mapped scan %.0f",
+                "mapped %zu / %zu keyframes (pose %s)%s | ms per keyframe: match %.0f, back-end %.0f%s; per mapped scan %.0f",
                 t_ + 1, T_, d[t_], locked_ ? ", locked" : ", not locked", err(FILTERED), err(GRAPH), err(RIGID),
                 mapped_.size(), map_kf_.size(), c_.pose.c_str(), survey_status().c_str(), tm.match / (t_ + 1) * 1e3,
-                (tm.rigid + tm.graph) / (t_ + 1) * 1e3, mapped_.empty() ? 0.0 : map_s_ / mapped_.size() * 1e3);
+                (tm.rigid + tm.graph) / (t_ + 1) * 1e3, geo, mapped_.empty() ? 0.0 : map_s_ / mapped_.size() * 1e3);
   return b;
 }
 

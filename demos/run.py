@@ -3,8 +3,11 @@
     python demos/run.py --site kth --seq kth_day_09 --model lidarrv_mcd          # network labels
     python demos/run.py --site tuhh --seq tuhh_day_03                            # ground-truth labels
     python demos/run.py ... --no-view --eval gt_labels --save run.png            # headless, scored
+    python demos/run.py ... --mapper nvblox --view 3d                            # 3D: voxels and mesh
 
-Needs $DATASET_PATH (the disk holding datasets/...). Keys in the view: close the window to stop.
+Needs $DATASET_PATH (the disk holding datasets/...). Close the window to stop. In the 3D view, drag and
+scroll to change the angle and zoom (the camera keeps following), v / m / s toggle the voxels, the mesh
+and the last scan; at the end the window stays open to look around.
 """
 
 import argparse
@@ -41,13 +44,23 @@ def main():
     ap.add_argument("--mapper", default="", choices=["", "cpu", "nvblox"],
                     help="map backend (default: config/mapping.yaml); nvblox: GPU voxel blocks with a TSDF")
     ap.add_argument("--mesh", help="save the nvblox TSDF mesh, coloured by class (ply)")
+    ap.add_argument("--view", default="2d", choices=["2d", "3d"], help="matplotlib (2d) or pyvista (3d) view")
+    ap.add_argument("--show", default="", choices=["", "voxels", "mesh", "both"],
+                    help="3d: what of the map to draw (default: the mesh with nvblox, else the voxels)")
     a = ap.parse_args()
 
     p = osmlocbki.Pipeline(a.site, a.seq, model=a.model, pose=a.pose, strength=a.strength, odometry=a.odometry,
                            scale_bias=a.scale_bias, yaw_rw=a.yaw_rw, max_kf=a.max_kf, map_spacing=a.map_spacing,
                            building_ids=a.building_ids, surface=a.surface, mapper=a.mapper)
-    view = LiveView(p, output="filtered" if a.pose == "filtered" else "lag" if a.pose == "lag" else "graph",
-                    show=not a.no_view) if (not a.no_view or a.save) else None
+    output = "filtered" if a.pose == "filtered" else "lag" if a.pose == "lag" else "graph"
+    view = None
+    if not a.no_view or a.save:
+        if a.view == "3d":
+            from osmlocbki.view3d import LiveView3D
+            show = {"": (None, None), "voxels": (True, False), "mesh": (False, True), "both": (True, True)}[a.show]
+            view = LiveView3D(p, output=output, show=not a.no_view, voxels=show[0], mesh=show[1])
+        else:
+            view = LiveView(p, output=output, show=not a.no_view)
     t0, n_mapped = time.time(), 0
     while p.step():
         if p.t % 100 == 0:
@@ -55,7 +68,7 @@ def main():
         if view and not a.no_view and (p.t % a.draw_every == 0 or len(p.mapped) != n_mapped):
             n_mapped = len(p.mapped)
             view.update()
-            if not plt.fignum_exists(view.fig.number):  # the window was closed
+            if view.closed if a.view == "3d" else not plt.fignum_exists(view.fig.number):  # the window was closed
                 break
     p.finish()
     print(p.status())
@@ -78,8 +91,11 @@ def main():
             view.save(a.save)
             print("saved", a.save)
         if not a.no_view:
-            plt.ioff()
-            plt.show()
+            if a.view == "3d":
+                view.hold()
+            else:
+                plt.ioff()
+                plt.show()
 
 
 if __name__ == "__main__":

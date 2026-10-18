@@ -84,10 +84,24 @@ def test_nvblox_run_and_mesh():
     assert p.mapper == "nvblox" and len(p.mapped) > 10
     vox = p.voxels()
     assert len(vox["cls"]) > 1000 and set(np.unique(vox["cls"])) <= set(range(1, 9))
+    m = p.mesh(full=True)
+    v, f, c = m["vertices"], m["triangles"], m["colors"]
+    assert len(f) > 10000 and f.max() < len(v) and len(c) == len(v)
+    assert np.isin(c[:, 0], list(p.taxonomy()["colors"][:, 0]) + [127]).mean() > 0.9  # class colours (127: grey, none)
     with tempfile.TemporaryDirectory() as d:
         p.save_mesh(os.path.join(d, "mesh.ply"))
         size = os.path.getsize(os.path.join(d, "mesh.ply"))
-    print(f"  {len(p.mapped)} scans mapped, {len(vox['cls'])} voxels, mesh {size / 1e6:.1f} MB")
+        try:
+            import pyvista  # noqa: F401
+        except ImportError:
+            print("  3D view skipped: no pyvista")
+        else:
+            from osmlocbki.view3d import LiveView3D
+            view = LiveView3D(p, show=False, voxels=True, mesh=True)
+            view.update(final=True)
+            view.save(os.path.join(d, "view3d.png"))
+            assert os.path.getsize(os.path.join(d, "view3d.png")) > 10000
+    print(f"  {len(p.mapped)} scans mapped, {len(vox['cls'])} voxels, mesh {len(f)} triangles ({size / 1e6:.1f} MB ply)")
     assert size > 100000
 
 

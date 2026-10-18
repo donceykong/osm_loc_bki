@@ -74,10 +74,21 @@ python demos/run.py --site tuhh --seq tuhh_day_03 --odometry drifting --scale-bi
 | `--no-view`, `--save PNG`, `--draw-every N` | headless; save the final view; keyframes between redraws |
 | `--surface FILE\|auto` | project an airborne survey (DSM/DEM) into the map around each mapped pose (see below) |
 | `--mapper cpu\|nvblox`, `--mesh PLY` | map backend (default `cpu`); nvblox: on the GPU with a TSDF, and its mesh coloured by class |
+| `--view 2d\|3d`, `--show voxels\|mesh\|both` | matplotlib (default) or pyvista 3D view; what of the map it draws (default: the mesh with nvblox, else voxels) |
 | `--building-ids ...` | override the building label ids (normally from the label set) |
 
 The view shows OSM, ground truth, the estimate and the last mapped scan (left), and the semantic map
-from above with OSM building outlines (right). Close it to stop. From Python:
+from above with OSM building outlines (right). Close it to stop. `--view 3d` (needs `pyvista`, in
+`environment.yaml`) draws the OSM map draped over the ground (the site's survey terrain where there is
+one), ground truth, the estimate, the robot and its hits, and the map as it grows, the camera
+following the robot: drag and scroll to change its angle and zoom; `v` / `m` / `s` toggle the voxels,
+the mesh and the last scan; the window stays open at the end.
+
+```bash
+python demos/run.py --site kth --seq kth_day_09 --model lidarrv_mcd --mapper nvblox --view 3d
+```
+
+From Python:
 
 ```python
 import osmlocbki
@@ -86,6 +97,7 @@ while p.step():
     pass
 p.finish()
 p.trajectory("lag"), p.voxels()
+p.mesh()        # nvblox: vertices, triangles, colours (map frame)
 ```
 
 ## Configuration
@@ -138,6 +150,9 @@ map, up to float rounding) and integrates every mapped scan into an nvblox TSDF 
 voxel the TSDF sees as free space (`free_distance` in front of a surface) is left out of the map's
 voxels, which drops the kernel's smear into the air and the trails of objects that moved; `--mesh`
 writes the TSDF's mesh coloured by each voxel's class. Scoring (`--eval`) reads the evidence unmasked.
+The TSDF takes every localization keyframe's scan (1 m apart, at the same settled poses), not only the
+mapped ones, so the mesh is closed on the ground (`every_keyframe`; ~3 ms per keyframe). KTH day_09
+peaks at 5.3 GB of GPU memory.
 
 Unlike the originals: OSM lines and points are buffered by their width (no libosmium); voxel
 downsampling uses exact keys (OSM-BKI's hash merges mirror-image voxels); ROS, the OSM count prior,

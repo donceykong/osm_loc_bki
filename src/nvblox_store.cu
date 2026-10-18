@@ -20,7 +20,7 @@
 #include "nvblox/map/blox.h"
 
 #ifndef OSMLOCBKI_MAX_CLASSES
-#define OSMLOCBKI_MAX_CLASSES 12
+#define OSMLOCBKI_MAX_CLASSES 9
 #endif
 
 namespace olb {
@@ -236,9 +236,22 @@ class NvbloxStore : public VoxelStore {
     mp.projective_integrator_params.lidar_projective_integrator_max_integration_distance_m = static_cast<float>(g_.max_range);
     mp.projective_integrator_params.projective_integrator_truncation_distance_vox = static_cast<float>(g_.truncation_vox);
     mapper_.setMapperParams(mp);
+    lidar_.linear_interpolation_max_allowable_difference_vox(static_cast<float>(g_.interp_max_difference_vox));
+    lidar_.nearest_interpolation_max_allowable_dist_to_ray_vox(static_cast<float>(g_.nearest_max_dist_vox));
   }
 
   bool has_geometry() const override { return true; }
+
+  std::string memory() const override {
+    auto& m = mapper();
+    auto& sem = const_cast<SemanticLayer&>(layer_);
+    auto mb = [](size_t b) { return static_cast<double>(b) / (1 << 20); };
+    char b[256];
+    std::snprintf(b, sizeof b, "GPU MB: semantic %.0f (%zu blocks), tsdf %.0f, color %.0f, mesh %.0f", mb(sem.numAllocatedBytes()),
+                  sem.numAllocatedBlocks(), mb(m.tsdf_layer().numAllocatedBytes()), mb(m.color_layer().numAllocatedBytes()),
+                  mb(m.color_mesh_layer().numAllocatedBytes()));
+    return b;
+  }
 
   void observe(const MatX3f& pts, const Eigen::Vector3f& origin) override {
     std::vector<nvblox::Vector3f> local;
@@ -252,6 +265,9 @@ class NvbloxStore : public VoxelStore {
     nvblox::Transform T = nvblox::Transform::Identity();
     T.translation() = (origin.array() + grid_.shift).matrix();
     mapper_.integrateDepth(cloud, T, lidar_, false);
+    // keep the mesh current a little at a time: meshing every pending block at once can take more
+    // GPU memory than the map itself
+    if (++unmeshed_ >= 10) mapper_.updateColorMesh(nvblox::UpdateFullLayer::kNo), unmeshed_ = 0;
   }
 
   void add_kernel(const std::vector<KernelPoint>& train, const MatXf& rows) override {
@@ -380,9 +396,36 @@ class NvbloxStore : public VoxelStore {
   }
 
   void save_mesh(const std::string& path, const std::vector<std::array<uint8_t, 3>>& colors) const override {
-    if (static_cast<int>(colors.size()) < nc_) throw std::invalid_argument("save_mesh: one colour per class");
-    auto& m = const_cast<nvblox::Mapper&>(mapper_);
-    // paint the colour layer where both the TSDF and the semantics have a block
+    remesh(colors, true);
+    if (!mapper().saveColorMeshAsPly(path)) throw std::runtime_error("could not write " + path);
+  }
+
+  void mesh(MatX3f& vertices, MatX3i& triangles, MatX3u8& rgb, const std::vector<std::array<uint8_t, 3>>& colors,
+            bool full) const override {
+    remesh(colors, full);
+    const auto cm = mapper().color_mesh_layer().getMesh(*stream_);
+    const auto v = cm->vertices.toVectorAsync(*stream_);
+    const auto c = cm->vertex_appearances.toVectorAsync(*stream_);
+    const auto f = cm->triangles.toVectorAsync(*stream_);
+    stream_->synchronize();
+    vertices.resize(static_cast<long>(v.size()), 3);
+    rgb.resize(static_cast<long>(v.size()), 3);
+    for (size_t i = 0; i < v.size(); ++i) {
+      vertices.row(i) = (v[i].array() - grid_.shift).matrix().transpose();
+      if (i < c.size()) rgb.row(i) << c[i].r(), c[i].g(), c[i].b();
+    }
+    triangles = Eigen::Map<const MatX3i>(f.data(), static_cast<long>(f.size() / 3), 3);
+  }
+
+
+ private:
+  nvblox::Mapper& mapper() const { return const_cast<nvblox::Mapper&>(mapper_); }
+
+  // the class colour into nvblox's colour layer where the TSDF and the semantics both have a block,
+  // then the mesh: of the blocks the TSDF changed since the last call, or of all of them
+  void remesh(const std::vector<std::array<uint8_t, 3>>& colors, bool full) const {
+    if (static_cast<int>(colors.size()) < nc_) throw std::invalid_argument("mesh: one colour per class");
+    auto& m = mapper();
     std::vector<SemanticBlock*> bp;
     std::vector<nvblox::ColorBlock*> cp;
     for (const auto& b : layer_.getAllBlockIndices()) {
@@ -394,19 +437,24 @@ class NvbloxStore : public VoxelStore {
     for (int c = 0; c < nc_; ++c) pal[c] = make_uchar3(colors[c][0], colors[c][1], colors[c][2]);
     const cudaStream_t s = *stream_;
     if (!bp.empty()) {
-      Buffer<nvblox::ColorBlock*> dcp;
-      Buffer<uchar3> dpal;
       SemanticBlock** db = blocks_.upload(bp.data(), bp.size(), s);
-      paint_kernel<<<static_cast<int>(bp.size()), dim3(kSide, kSide, kSide), 0, s>>>(db, dcp.upload(cp.data(), cp.size(), s), nc_,
-                                                                                     dpal.upload(pal.data(), nc_, s));
+      paint_kernel<<<static_cast<int>(bp.size()), dim3(kSide, kSide, kSide), 0, s>>>(db, color_.upload(cp.data(), cp.size(), s),
+                                                                                     nc_, palette_.upload(pal.data(), nc_, s));
       check(cudaGetLastError(), "paint");
       stream_->synchronize();
     }
-    m.updateColorMesh(nvblox::UpdateFullLayer::kYes);
-    if (!m.saveColorMeshAsPly(path)) throw std::runtime_error("could not write " + path);
+    m.updateColorMesh(nvblox::UpdateFullLayer::kNo);  // what the scans changed since
+    unmeshed_ = 0;
+    if (!full) return;
+    // all of it, a batch of blocks at a time (meshing every block at once runs out of GPU memory)
+    constexpr size_t kBatch = 2048;
+    const auto all = m.tsdf_layer().getAllBlockIndices();
+    for (size_t i = 0; i < all.size(); i += kBatch) {
+      m.markBlocksForUpdate(std::vector<nvblox::Index3D>(all.begin() + i, all.begin() + std::min(all.size(), i + kBatch)));
+      m.updateColorMesh(nvblox::UpdateFullLayer::kNo);
+    }
   }
 
- private:
   static int64_t pack(int64_t i, int64_t j, int64_t k) {
     constexpr int64_t bias = int64_t(1) << 20;
     return ((i + bias) << 42) | ((j + bias) << 21) | (k + bias);
@@ -440,6 +488,9 @@ class NvbloxStore : public VoxelStore {
   mutable Buffer<int> cls_;
   mutable Buffer<SemanticBlock*> blocks_;
   mutable Buffer<const nvblox::TsdfBlock*> tsdf_;
+  mutable Buffer<nvblox::ColorBlock*> color_;
+  mutable Buffer<uchar3> palette_;
+  mutable int unmeshed_ = 0;  // scans integrated since the mesh was last updated
 };
 
 }  // namespace

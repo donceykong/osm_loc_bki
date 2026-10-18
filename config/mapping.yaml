@@ -35,6 +35,9 @@ nvblox:                  # the nvblox backend: a TSDF of the same scans at the m
   elevation_deg: [-22.5, 22.5]
   max_range: 60.0        # TSDF integration distance, m
   truncation_vox: 4.0
+  every_keyframe: true   # the TSDF takes every localization keyframe's scan (1 m apart), not only the mapped ones
+  nearest_max_dist_vox: 1.5        # how far off the nearest LiDAR ray a voxel may be integrated (nvblox: 0.5)
+  interp_max_difference_vox: 2.0   # range jump between neighbouring pixels that stops interpolation
   free_space_mask: true  # report no semantic voxel where the TSDF sees free space (kernel smear, moved objects)
   free_distance: 0.45    # m: TSDF distance beyond which a voxel is free
 

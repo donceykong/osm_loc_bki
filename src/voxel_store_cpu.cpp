@@ -162,6 +162,10 @@ void VoxelStore::save_mesh(const std::string&, const std::vector<std::array<uint
   throw std::logic_error("this map has no geometry to mesh: map with nvblox (--mapper nvblox)");
 }
 
+void VoxelStore::mesh(MatX3f&, MatX3i&, MatX3u8&, const std::vector<std::array<uint8_t, 3>>&, bool) const {
+  throw std::logic_error("this map has no geometry to mesh: map with nvblox (--mapper nvblox)");
+}
+
 std::unique_ptr<VoxelStore> make_cpu_store(int num_class, const StoreParams& p) { return std::make_unique<CpuStore>(num_class, p); }
 
 }  // namespace olb

@@ -181,6 +181,25 @@ PYBIND11_MODULE(_osmlocbki, m) {
              p.semantic_map()->save_mesh(path, p.taxonomy().colors);
            },
            py::arg("path"), "The nvblox backend's TSDF mesh, coloured by class, as PLY.")
+      .def("mesh",
+           [](const Pipeline& p, bool full) {
+             if (!p.semantic_map()) throw std::logic_error("no map: the pipeline runs with map=False");
+             MatX3f v;
+             MatX3i f;
+             MatX3u8 c;
+             {
+               py::gil_scoped_release free;
+               p.semantic_map()->mesh(v, f, c, p.taxonomy().colors, full);
+             }
+             py::dict d;
+             d["vertices"] = v, d["triangles"] = f, d["colors"] = c, d["origin"] = p.semantic_map()->utm_origin();
+             return d;
+           },
+           py::arg("full") = false,
+           "The nvblox backend's TSDF mesh coloured by class, map frame: vertices (N, 3), triangles (M, 3), colors\n"
+           "(N, 3) uint8, origin (UTM of the map frame). full=False re-meshes only what changed since the last call.")
+      .def("memory", [](const Pipeline& p) { return p.semantic_map() ? p.semantic_map()->memory() : std::string(); },
+           "The nvblox backend's GPU memory per layer.")
       .def_property_readonly("mapper", [](const Pipeline& p) { return p.semantic_map() ? p.semantic_map()->params().backend : ""; })
       .def_property_readonly("map_seconds", &Pipeline::map_seconds)
       .def_property_readonly("survey_voxels", &Pipeline::survey_voxels, "Survey voxels projected into the map so far.")

@@ -18,6 +18,9 @@
 
 namespace olb {
 
+using MatX3i = Eigen::Matrix<int, Eigen::Dynamic, 3, Eigen::RowMajor>;
+using MatX3u8 = Eigen::Matrix<uint8_t, Eigen::Dynamic, 3, Eigen::RowMajor>;
+
 struct StoreParams {
   double resolution = 0.3;  // voxel size, m
   int block_depth = 2;      // BKI blocks of 2^(block_depth - 1) voxels a side
@@ -37,8 +40,12 @@ struct NvbloxParams {
   double min_elevation_deg = -22.5, max_elevation_deg = 22.5;
   double max_range = 60.0;                          // TSDF integration distance, m
   double truncation_vox = 4.0;                      // TSDF truncation, voxels
+  // how far apart a voxel's neighbouring range pixels may be for it to be interpolated, and how far
+  // off the nearest ray it may be otherwise (voxels): the gaps between rings on the ground
+  double interp_max_difference_vox = 2.0, nearest_max_dist_vox = 0.5;
   // report a semantic voxel only where the TSDF does not see free space: no BKI smear into the air
   // around surfaces, and no trails where objects moved
+  bool every_keyframe = true;  // TSDF from every localization keyframe's scan, not only the mapped ones
   bool free_space_mask = true;
   double free_distance = 0.45;                      // m: a TSDF distance beyond this is free space
 };
@@ -58,8 +65,14 @@ class VoxelStore {
   // a scan's geometry: points in the map frame and the sensor's position (no-op without geometry)
   virtual void observe(const MatX3f& /*pts*/, const Eigen::Vector3f& /*origin*/) {}
   virtual bool has_geometry() const { return false; }
+  // GPU memory per layer, MB ("" without one)
+  virtual std::string memory() const { return ""; }
   // the surface mesh, coloured by class (colors: one RGB per class), as PLY
   virtual void save_mesh(const std::string& path, const std::vector<std::array<uint8_t, 3>>& colors) const;
+  // the same mesh in the map frame: vertices, triangles (vertex indices), vertex colours; full = false
+  // re-meshes only what the scans changed since the last call (cheaper; older parts keep their colours)
+  virtual void mesh(MatX3f& vertices, MatX3i& triangles, MatX3u8& rgb, const std::vector<std::array<uint8_t, 3>>& colors,
+                    bool full) const;
 };
 
 std::unique_ptr<VoxelStore> make_cpu_store(int num_class, const StoreParams& p);

@@ -19,5 +19,6 @@ dependencies:
   - lxml
   - pyyaml
   - matplotlib
+  - pyvista                # the 3D view (run.py --view 3d)
   - pip:
       - -e .   # builds the C++ core (CMake) and installs the osmlocbki package
