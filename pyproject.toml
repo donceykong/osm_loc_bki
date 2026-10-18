@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "lxml", "pyyaml", "matplotlib"]
 
 [tool.scikit-build]
-cmake.version = ">=3.24"
+cmake.version = ">=3.25"
 cmake.define = { OSMLOCBKI_TESTS = "OFF" }
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["python/osmlocbki"]

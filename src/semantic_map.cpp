@@ -3,51 +3,28 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace olb {
 
 namespace {
 
-constexpr int64_t kBias = int64_t(1) << 20;  // 21 bits per axis: +-1M blocks
-
+constexpr int64_t kBias = int64_t(1) << 20;  // 21 bits per axis
 int64_t pack(int64_t i, int64_t j, int64_t k) { return ((i + kBias) << 42) | ((j + kBias) << 21) | (k + kBias); }
-int64_t unpack(int64_t key, int axis) { return ((key >> (42 - 21 * axis)) & ((int64_t(1) << 21) - 1)) - kBias; }
-
-// the sparse kernel of Melkumyan & Ramos (2009) at r = distance / length scale, without sf2
-inline float sparse_kernel(float r) {
-  constexpr float two_pi = 2.0f * 3.1415926f;
-  return (2.0f + std::cos(two_pi * r)) * (1.0f - r) / 3.0f + std::sin(two_pi * r) / two_pi;
-}
 
 }  // namespace
 
 SemanticMap::SemanticMap(int num_class, const MapParams& p, std::shared_ptr<const OsmPrior> osm, const Vec2& utm_origin)
     : nc_(num_class), p_(p), osm_(std::move(osm)), origin_utm_(utm_origin) {
-  if (p_.block_depth < 1) throw std::invalid_argument("block_depth must be at least 1");
   if (osm_ && osm_->num_class() != nc_) throw std::invalid_argument("the OSM prior has another number of classes");
-  cells_ = 1 << (p_.block_depth - 1);
-  block_size_ = cells_ * p_.resolution;
-  for (int k = 0; k < cells_; ++k)
-    for (int j = 0; j < cells_; ++j)
-      for (int i = 0; i < cells_; ++i)
-        leaf_offset_.push_back(Eigen::Vector3f(i - (cells_ - 1) / 2.0, j - (cells_ - 1) / 2.0, k - (cells_ - 1) / 2.0) *
-                               static_cast<float>(p_.resolution));
-}
-
-int64_t SemanticMap::key_of(const Eigen::Vector3f& x) const {
-  auto b = [&](float v) { return static_cast<int64_t>(std::floor(v / block_size_ + 0.5)); };
-  return pack(b(x[0]), b(x[1]), b(x[2]));
-}
-
-Eigen::Vector3f SemanticMap::center_of(int64_t key) const {
-  return Eigen::Vector3f(unpack(key, 0), unpack(key, 1), unpack(key, 2)) * static_cast<float>(block_size_);
-}
-
-int SemanticMap::leaf_of(const Eigen::Vector3f& x, int64_t key) const {
-  Eigen::Vector3f lo = center_of(key) - Eigen::Vector3f::Constant(0.5f * block_size_);
-  int idx[3];
-  for (int a = 0; a < 3; ++a) idx[a] = std::clamp(static_cast<int>(std::floor((x[a] - lo[a]) / p_.resolution)), 0, cells_ - 1);
-  return idx[0] + cells_ * (idx[1] + cells_ * idx[2]);
+  StoreParams sp;
+  sp.resolution = p_.resolution, sp.block_depth = p_.block_depth, sp.sf2 = p_.sf2, sp.prior = p_.prior;
+  if (p_.backend == "cpu")
+    store_ = make_cpu_store(nc_, sp);
+  else if (p_.backend == "nvblox")
+    store_ = make_nvblox_store(nc_, sp, p_.nvblox);
+  else
+    throw std::invalid_argument("unknown map backend " + p_.backend + " (cpu or nvblox)");
 }
 
 void SemanticMap::insert(const MatX3f& pts, const Semantics& sem, const std::vector<int8_t>& ground, const Vec3& origin) {
@@ -85,7 +62,7 @@ void SemanticMap::insert(const MatX3f& pts, const Semantics& sem, const std::vec
   }
 
   // what each training point deposits (OSM-boosted), and how far it reaches
-  std::vector<Train> train;
+  std::vector<KernelPoint> train;
   MatXf rows(acc.size(), nc_);
   std::vector<float> s(nc_);
   const bool use_osm = osm_ && p_.strength > 0;
@@ -105,109 +82,27 @@ void SemanticMap::insert(const MatX3f& pts, const Semantics& sem, const std::vec
       len *= std::max(1e-6f, static_cast<float>(p_.adapt_a) * std::exp(1.0f + static_cast<float>(p_.adapt_b) * u));
     }
     rows.row(static_cast<long>(train.size())) = pm.transpose();
-    train.push_back({x, 1.0f / len, static_cast<int>(train.size())});
+    train.push_back({x, 1.0f / len});
   }
+  if (store_->has_geometry()) store_->observe(pts, o);
   if (train.empty()) return;
-
-  // points by block; the blocks they reach: their own and its six face neighbours
-  std::unordered_map<int64_t, std::vector<int>> by_block;
-  for (size_t j = 0; j < train.size(); ++j) by_block[key_of(train[j].x)].push_back(static_cast<int>(j));
-  auto neighbours = [&](int64_t key) {
-    int64_t i = unpack(key, 0), j = unpack(key, 1), k = unpack(key, 2);
-    return std::array<int64_t, 7>{key, pack(i + 1, j, k), pack(i - 1, j, k), pack(i, j + 1, k), pack(i, j - 1, k),
-                                  pack(i, j, k + 1), pack(i, j, k - 1)};
-  };
-  std::vector<std::pair<int64_t, std::vector<float>*>> test;
-  {
-    std::unordered_map<int64_t, char> seen;
-    for (const auto& kv : by_block)
-      for (int64_t b : neighbours(kv.first))
-        if (seen.emplace(b, 1).second) {
-          auto& ev = blocks_[b];
-          if (ev.empty()) ev.assign(leaf_offset_.size() * nc_, 0.0f);
-          test.emplace_back(b, &ev);
-        }
-  }
-
-  const float sf2 = static_cast<float>(p_.sf2);
-#pragma omp parallel for schedule(dynamic, 64)
-  for (long t = 0; t < static_cast<long>(test.size()); ++t) {
-    const int64_t key = test[t].first;
-    std::vector<float>& ev = *test[t].second;
-    const Eigen::Vector3f c = center_of(key);
-    std::vector<double> ybar(nc_);
-    for (size_t l = 0; l < leaf_offset_.size(); ++l) {
-      const Eigen::Vector3f leaf = c + leaf_offset_[l];
-      std::fill(ybar.begin(), ybar.end(), 0.0);
-      bool any = false;
-      for (int64_t b : neighbours(key)) {
-        auto it = by_block.find(b);
-        if (it == by_block.end()) continue;
-        for (int j : it->second) {
-          const Train& tp = train[j];
-          float r = (leaf - tp.x).norm() * tp.inv_len;
-          if (r >= 1.0f) continue;  // the kernel's compact support
-          float k = sf2 * sparse_kernel(r);
-          if (k <= 0) continue;
-          for (int cc = 0; cc < nc_; ++cc) ybar[cc] += k * rows(tp.row, cc);
-          any = true;
-        }
-      }
-      if (any)
-        for (int cc = 0; cc < nc_; ++cc) ev[l * nc_ + cc] += static_cast<float>(ybar[cc]);
-    }
-  }
+  store_->add_kernel(train, rows.topRows(static_cast<long>(train.size())));
 }
 
 void SemanticMap::deposit(const MatX3f& pts, const MatXf& rows) {
   if (rows.rows() != pts.rows() || rows.cols() != nc_) throw std::invalid_argument("deposit: one row of classes per point");
-  for (long i = 0; i < pts.rows(); ++i) {
-    Eigen::Vector3f x = pts.row(i).transpose();
-    if (!x.allFinite() || !(rows.row(i).sum() > 0)) continue;
-    int64_t key = key_of(x);
-    auto& ev = blocks_[key];
-    if (ev.empty()) ev.assign(leaf_offset_.size() * nc_, 0.0f);
-    float* e = ev.data() + leaf_of(x, key) * nc_;
-    for (int c = 0; c < nc_; ++c) e[c] += rows(i, c);
-  }
+  store_->add_at(pts, rows);
 }
 
-std::vector<int> SemanticMap::classify(const MatX3f& pts) const {
-  std::vector<int> out(pts.rows(), 0);
-  for (long i = 0; i < pts.rows(); ++i) {
-    Eigen::Vector3f x = pts.row(i).transpose();
-    int64_t key = key_of(x);
-    auto it = blocks_.find(key);
-    if (it == blocks_.end()) continue;
-    const float* e = it->second.data() + leaf_of(x, key) * nc_;
-    out[i] = static_cast<int>(std::max_element(e, e + nc_) - e);  // the prior is uniform: argmax of the evidence
-    if (e[out[i]] <= 0) out[i] = 0;
-  }
-  return out;
-}
+std::vector<int> SemanticMap::classify(const MatX3f& pts) const { return store_->classify(pts); }
 
 void SemanticMap::voxels(MatX3f& xyz, std::vector<int>& cls, std::vector<float>& prob, std::vector<float>& mass,
                          const Box* box) const {
-  std::vector<Eigen::Vector3f> at;
-  cls.clear(), prob.clear(), mass.clear();
-  const float prior = static_cast<float>(p_.prior);
-  for (const auto& [key, ev] : blocks_) {
-    const Eigen::Vector3f c = center_of(key);
-    if (box && (c[0] < (*box)[0] || c[1] < (*box)[1] || c[0] > (*box)[2] || c[1] > (*box)[3])) continue;
-    for (size_t l = 0; l < leaf_offset_.size(); ++l) {
-      const float* e = ev.data() + l * nc_;
-      float m = 0;
-      for (int cc = 0; cc < nc_; ++cc) m += e[cc];
-      if (!(m > 0)) continue;
-      int best = static_cast<int>(std::max_element(e, e + nc_) - e);
-      at.push_back(c + leaf_offset_[l]);
-      cls.push_back(best);
-      prob.push_back((prior + e[best]) / (nc_ * prior + m));
-      mass.push_back(m);
-    }
-  }
-  xyz.resize(at.size(), 3);
-  for (size_t i = 0; i < at.size(); ++i) xyz.row(i) = at[i].transpose();
+  store_->voxels(xyz, cls, prob, mass, box);
+}
+
+void SemanticMap::save_mesh(const std::string& path, const std::vector<std::array<uint8_t, 3>>& colors) const {
+  store_->save_mesh(path, colors);
 }
 
 }  // namespace olb

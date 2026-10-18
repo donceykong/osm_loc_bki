@@ -68,6 +68,29 @@ def test_short_run_and_view():
     assert acc > 0.5
 
 
+def test_nvblox_run_and_mesh():
+    import osmlocbki
+    base = os.environ.get("DATASET_PATH")
+    if not osmlocbki.have_nvblox():
+        print("  skipped: built without nvblox")
+        return
+    if not base or not os.path.isdir(os.path.join(base, "datasets/mcd/kth/kth_day_09/inferred_labels/lidarrv_mcd")):
+        print("  skipped: needs $DATASET_PATH with MCD KTH and lidarrv_mcd labels")
+        return
+    p = osmlocbki.Pipeline("kth", "kth_day_09", model="lidarrv_mcd", pose="filtered", max_kf=250, mapper="nvblox")
+    while p.step():
+        pass
+    p.finish()
+    assert p.mapper == "nvblox" and len(p.mapped) > 10
+    vox = p.voxels()
+    assert len(vox["cls"]) > 1000 and set(np.unique(vox["cls"])) <= set(range(1, 9))
+    with tempfile.TemporaryDirectory() as d:
+        p.save_mesh(os.path.join(d, "mesh.ply"))
+        size = os.path.getsize(os.path.join(d, "mesh.ply"))
+    print(f"  {len(p.mapped)} scans mapped, {len(vox['cls'])} voxels, mesh {size / 1e6:.1f} MB")
+    assert size > 100000
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

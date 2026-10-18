@@ -51,6 +51,7 @@ struct PipelineConfig {
   std::string mapping = "mapping.yaml";  // under config/
   double strength = -1;           // OSM strength; < 0: the mapping config's
   std::string surface;            // airborne survey .npz ("auto": data/surface/<map>_epsg<zone>.npz); empty: none
+  std::string mapper;             // map backend, cpu | nvblox; empty: the mapping config's
 };
 
 // a mapped keyframe: its scan in the map frame and the classes its points came in with

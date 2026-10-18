@@ -9,6 +9,7 @@ map:
   adaptive_kernel: {enabled: true, a: 1.0, b: -3.0}   # length ell * a * exp(1 + b * vacuity)
   ds_resolution: 0.1     # scans are averaged over voxels this size before insertion
   max_range: 200.0       # m from the sensor
+  backend: cpu           # where the voxels live: cpu, or nvblox (GPU, with nvblox's TSDF; run.py --mapper)
 
 osm:
   strength: 0.1          # lambda: 0.1 for an in-domain model (lidarrv_mcd), ~2 under domain shift
@@ -27,6 +28,15 @@ ground:                  # Patchwork++ verdicts gate OSM support (config/labels.
   min_range: 0.0
   max_range: 200.0
   reflected_noise_removal: false
+
+nvblox:                  # the nvblox backend: a TSDF of the same scans at the map's resolution
+  azimuth: 512           # the LiDAR's range image (MCD: Ouster OS1-128, 512 columns)
+  elevation: 128
+  elevation_deg: [-22.5, 22.5]
+  max_range: 60.0        # TSDF integration distance, m
+  truncation_vox: 4.0
+  free_space_mask: true  # report no semantic voxel where the TSDF sees free space (kernel smear, moved objects)
+  free_distance: 0.45    # m: TSDF distance beyond which a voxel is free
 
 survey:                  # an airborne survey (DSM/DEM) in the loop: run.py --surface FILE|auto
   weight: 0.1            # a survey voxel's evidence (times OSM's support), in LiDAR points: LiDAR wins

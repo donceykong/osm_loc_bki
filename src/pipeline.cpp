@@ -63,6 +63,15 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.site)) {
   }
   read(o, "strength", mp.strength);
   if (c.strength >= 0) mp.strength = c.strength;
+  read(m, "backend", mp.backend);
+  if (!c.mapper.empty()) mp.backend = c.mapper;
+  if (const YAML::Node v = y["nvblox"]) {
+    NvbloxParams& nv = mp.nvblox;
+    read(v, "azimuth", nv.azimuth), read(v, "elevation", nv.elevation), read(v, "max_range", nv.max_range);
+    read(v, "truncation_vox", nv.truncation_vox), read(v, "free_space_mask", nv.free_space_mask);
+    read(v, "free_distance", nv.free_distance);
+    if (v["elevation_deg"]) nv.min_elevation_deg = v["elevation_deg"][0].as<double>(), nv.max_elevation_deg = v["elevation_deg"][1].as<double>();
+  }
   OsmParams op;
   read(o, "decay_m", op.decay_m);
   if (o && o["widths"])
@@ -104,8 +113,8 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.site)) {
     Vec3 p = seq_->lidar_world.row(t).transpose();
     if (map_kf_.empty() || (p - last).norm() >= c.map_spacing) is_map_kf_[t] = 1, map_kf_.push_back(t), last = p;
   }
-  std::fprintf(stderr, "  mapping %zu keyframes (%s, OSM strength %g), pose %s\n", map_kf_.size(),
-               alpha_ ? "the model's class distributions" : "one-hot labels", mp.strength, c_.pose.c_str());
+  std::fprintf(stderr, "  mapping %zu keyframes (%s, OSM strength %g), pose %s, %s backend\n", map_kf_.size(),
+               alpha_ ? "the model's class distributions" : "one-hot labels", mp.strength, c_.pose.c_str(), mp.backend.c_str());
 }
 
 Pipeline::~Pipeline() = default;

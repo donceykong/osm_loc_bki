@@ -38,11 +38,14 @@ def main():
     ap.add_argument("--eval", metavar="LABELS_DIR", help="score the map against <seq>/LABELS_DIR (e.g. gt_labels)")
     ap.add_argument("--label-set", default="mcd", help="label set of --eval's labels")
     ap.add_argument("--save", help="save the final view (png)")
+    ap.add_argument("--mapper", default="", choices=["", "cpu", "nvblox"],
+                    help="map backend (default: config/mapping.yaml); nvblox: GPU voxel blocks with a TSDF")
+    ap.add_argument("--mesh", help="save the nvblox TSDF mesh, coloured by class (ply)")
     a = ap.parse_args()
 
     p = osmlocbki.Pipeline(a.site, a.seq, model=a.model, pose=a.pose, strength=a.strength, odometry=a.odometry,
                            scale_bias=a.scale_bias, yaw_rw=a.yaw_rw, max_kf=a.max_kf, map_spacing=a.map_spacing,
-                           building_ids=a.building_ids, surface=a.surface)
+                           building_ids=a.building_ids, surface=a.surface, mapper=a.mapper)
     view = LiveView(p, output="filtered" if a.pose == "filtered" else "lag" if a.pose == "lag" else "graph",
                     show=not a.no_view) if (not a.no_view or a.save) else None
     t0, n_mapped = time.time(), 0
@@ -66,6 +69,9 @@ def main():
         names = p.taxonomy()["names"][1:]
         print("  map vs " + a.eval + ": mIoU %.3f, accuracy %.3f" % (miou, acc))
         print("    " + ", ".join(f"{n} {v:.2f}" for n, v in zip(names, iou) if np.isfinite(v)))
+    if a.mesh:
+        p.save_mesh(a.mesh)
+        print("saved", a.mesh)
     if view:
         view.update(final=True)
         if a.save:

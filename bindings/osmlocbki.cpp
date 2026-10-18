@@ -21,7 +21,8 @@ std::unique_ptr<Pipeline> make_pipeline(const std::string& site, const std::stri
                                         const std::string& pose, bool map, double strength, const std::string& odometry,
                                         double scale_bias, double yaw_rw, unsigned seed, long max_kf, double spacing,
                                         double map_spacing, double lock_m, double lag_m, std::vector<int> building_ids,
-                                        const std::string& mapping, const std::string& surface) {
+                                        const std::string& mapping, const std::string& surface,
+                                        const std::string& mapper) {
   PipelineConfig c;
   c.site = site, c.seq = seq, c.model = model, c.pose = pose, c.map = map, c.strength = strength;
   if (odometry != "near_exact" && odometry != "drifting") throw std::invalid_argument("odometry: near_exact or drifting");
@@ -29,6 +30,7 @@ std::unique_ptr<Pipeline> make_pipeline(const std::string& site, const std::stri
   c.odometry.scale_bias = scale_bias, c.odometry.yaw_rw = yaw_rw, c.odometry.seed = seed;
   c.max_kf = max_kf, c.spacing = spacing, c.map_spacing = map_spacing, c.lock_m = lock_m, c.lag_m = lag_m;
   c.building_ids = std::move(building_ids), c.mapping = mapping, c.surface = surface;
+  c.mapper = mapper;
   return std::make_unique<Pipeline>(c);
 }
 
@@ -97,6 +99,7 @@ PYBIND11_MODULE(_osmlocbki, m) {
   m.doc() = "Global localization against OpenStreetMap and OSM-BKI semantic mapping (C++)";
 
   m.def("sites", &Site::names, "Site names in config/sites.yaml.");
+  m.def("have_nvblox", &have_nvblox, "Whether this build has the nvblox (GPU) map backend.");
   m.def("data_dir", &data_dir, "Where generated files go (data/ or $OSMLOCBKI_DATA).");
   m.def("config_dir", &config_dir, "The repository's config/.");
   m.def(
@@ -126,11 +129,12 @@ PYBIND11_MODULE(_osmlocbki, m) {
            py::arg("scale_bias") = 0.0, py::arg("yaw_rw") = 0.0, py::arg("seed") = 1u, py::arg("max_kf") = 0,
            py::arg("spacing") = 1.0, py::arg("map_spacing") = 5.0, py::arg("lock_m") = 100.0, py::arg("lag_m") = 60.0,
            py::arg("building_ids") = std::vector<int>{}, py::arg("mapping") = "mapping.yaml", py::arg("surface") = "",
+           py::arg("mapper") = "",
            "Localize a sequence keyframe by keyframe and map it with OSM-BKI (see pipeline.hpp).\n"
            "pose: lag | filtered | gt; strength: OSM strength (< 0: config/mapping.yaml's); odometry: near_exact or\n"
            "drifting graph preset, with simulated drift scale_bias (fraction) and yaw_rw (deg / sqrt(m)).\n"
            "surface: an airborne survey .npz projected into the map around each mapped pose ('auto':\n"
-           "data/surface/<map>_epsg<zone>.npz).")
+           "data/surface/<map>_epsg<zone>.npz). mapper: cpu | nvblox (GPU, with a TSDF; '': config/mapping.yaml's).")
       .def("step", &Pipeline::step, py::call_guard<py::gil_scoped_release>(),
            "Localize the next keyframe and map what is ready -> False when done.")
       .def("finish", &Pipeline::finish, py::call_guard<py::gil_scoped_release>(), "Settle the lag and map what it settles.")
@@ -170,6 +174,14 @@ PYBIND11_MODULE(_osmlocbki, m) {
            "Keyframe t's scan at its ground-truth pose, classified by the map (one class per raw point).")
       .def("osm", &osm_layers, "The OSM map in UTM: buildings, holes, features [(class, area|line|point, (N, 2))].")
       .def("taxonomy", &taxonomy, "The common classes' names and colours.")
+      .def("save_mesh",
+           [](const Pipeline& p, const std::string& path) {
+             if (!p.semantic_map()) throw std::logic_error("no map: the pipeline runs with map=False");
+             py::gil_scoped_release free;
+             p.semantic_map()->save_mesh(path, p.taxonomy().colors);
+           },
+           py::arg("path"), "The nvblox backend's TSDF mesh, coloured by class, as PLY.")
+      .def_property_readonly("mapper", [](const Pipeline& p) { return p.semantic_map() ? p.semantic_map()->params().backend : ""; })
       .def_property_readonly("map_seconds", &Pipeline::map_seconds)
       .def_property_readonly("survey_voxels", &Pipeline::survey_voxels, "Survey voxels projected into the map so far.")
       .def_property_readonly("survey_offset", &Pipeline::survey_offset, "Survey height -> map z (NaN until estimated).");

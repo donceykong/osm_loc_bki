@@ -15,6 +15,20 @@ export DATASET_PATH=/path/to/disk         # the disk holding datasets/mcd/...
 
 Re-run `pip install -e .` after changing C++ code or moving the repository.
 
+**GPU mapping with nvblox (optional).** With a CUDA toolkit and an
+[nvblox](https://github.com/nvidia-isaac/nvblox) checkout next to this repository, the build adds an
+nvblox backend (`--mapper nvblox`; the first build takes a few minutes longer):
+
+```bash
+conda install -c conda-forge "cuda-version=13.0" cuda-nvcc cuda-cudart-dev cuda-cccl cuda-nvtx-dev libnpp-dev libcurand-dev
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/nvidia-isaac/nvblox.git ../nvblox   # tested at 24eee49
+pip install -e .                          # python -c "import osmlocbki; print(osmlocbki.have_nvblox())"
+```
+
+Pick `cuda-version` for your driver (`nvidia-smi`) and host compiler (CUDA 13.0 takes the env's
+gcc 15). `-Ccmake.define.NVBLOX_SOURCE_DIR=PATH` uses another checkout, `...OSMLOCBKI_NVBLOX=OFF`
+skips it.
+
 Expected data (MCD KTH shown; other sites in `config/sites.yaml`):
 
 ```
@@ -59,6 +73,7 @@ python demos/run.py --site tuhh --seq tuhh_day_03 --odometry drifting --scale-bi
 | `--eval DIR`, `--label-set SET` | score the map against `<seq>/DIR` labels (label set, default `mcd`) |
 | `--no-view`, `--save PNG`, `--draw-every N` | headless; save the final view; keyframes between redraws |
 | `--surface FILE\|auto` | project an airborne survey (DSM/DEM) into the map around each mapped pose (see below) |
+| `--mapper cpu\|nvblox`, `--mesh PLY` | map backend (default `cpu`); nvblox: on the GPU with a TSDF, and its mesh coloured by class |
 | `--building-ids ...` | override the building label ids (normally from the label set) |
 
 The view shows OSM, ground truth, the estimate and the last mapped scan (left), and the semantic map
@@ -80,7 +95,8 @@ p.trajectory("lag"), p.voxels()
   its building ids for localization (`localization_buildings:`) and which models use it (`models:`).
   A new model only needs a `models:` entry.
 - `config/mapping.yaml`: mapping and OSM settings, including `strength` and the OSM confusion matrix
-  (`osm_confusion/mcd_hand.yaml` by default), and the airborne survey's (`survey:`).
+  (`osm_confusion/mcd_hand.yaml` by default), the backend (`map: backend`), nvblox's LiDAR model and
+  TSDF (`nvblox:`), and the airborne survey's (`survey:`).
 
 **Airborne survey (optional).** With `--surface`, each mapped scan also projects the survey within
 50 m into the map: every survey voxel once, labelled by OSM gated by its height over the survey's
@@ -103,8 +119,9 @@ python tests/test_python.py         # short KTH run when DATASET_PATH holds MCD 
 ```
 
 They check localization against the original Python/GTSAM outputs, the mapper voxel-for-voxel against
-the original OSM-BKI code (`tests/reference/make_reference.sh` regenerates that reference), and
-TUHH day_03 end to end.
+the original OSM-BKI code (`tests/reference/make_reference.sh` regenerates that reference), the nvblox
+backend against the CPU one (and its free-space mask), and TUHH day_03 end to end.
+`GLOG_minloglevel=1` quiets nvblox's logging.
 
 ## How it works
 
@@ -115,6 +132,12 @@ once the localizer is locked (100 m travelled and `rigid` agrees with `graph`), 
 its pose and inserted into a Bayesian kernel inference voxel map: each point deposits the network's
 class distribution, boosted toward the classes nearby OSM features support, gated by Patchwork++
 ground segmentation.
+
+The nvblox backend keeps the same voxels in nvblox's GPU voxel blocks (the same evidence as the CPU
+map, up to float rounding) and integrates every mapped scan into an nvblox TSDF on the same grid. A
+voxel the TSDF sees as free space (`free_distance` in front of a surface) is left out of the map's
+voxels, which drops the kernel's smear into the air and the trails of objects that moved; `--mesh`
+writes the TSDF's mesh coloured by each voxel's class. Scoring (`--eval`) reads the evidence unmasked.
 
 Unlike the originals: OSM lines and points are buffered by their width (no libosmium); voxel
 downsampling uses exact keys (OSM-BKI's hash merges mirror-image voxels); ROS, the OSM count prior,
