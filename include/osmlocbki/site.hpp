@@ -61,11 +61,13 @@ class Site {
   std::optional<std::set<long>> alpha_scans(const std::string& seq, const std::string& model) const;
   std::vector<float> load_alpha(const std::string& seq, long id, const std::string& model) const;  // (N, K)
   std::vector<float> load_scan(const std::string& seq, long id) const;  // (N, 4) x y z intensity
+  std::string scan_path(const std::string& seq, long id) const;
   std::vector<int32_t> load_labels(const std::string& seq, long id, long n_points, const std::string& model = "") const;
 
  private:
   std::shared_ptr<const osmloc::Site> loc_;
-  std::shared_ptr<YAML::Node> cfg_;  // config/sites.yaml's entry (empty when there is none)
+  std::shared_ptr<YAML::Node> cfg_;  // config/sites.yaml's entry (its own, else the longest site name it starts with)
+  std::string scans_;  // the scans' folder in a sequence (osm_localization's sites.yaml)
   std::string alpha_dir(const std::string& seq, const std::string& model) const;
 };
 

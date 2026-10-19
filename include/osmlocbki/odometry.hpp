@@ -19,8 +19,8 @@ struct OdometryParams {
   double min_range = 1.0, max_range = 100.0;
 };
 
-// id -> the LiDAR's pose in FORM's frame (the first scan's LiDAR frame), for the scans of the pose
-// file up to and including last_id
+// id -> the LiDAR's pose in FORM's frame (the first scan's LiDAR frame), for every scan from the pose
+// file's first up to and including last_id
 std::map<long, Eigen::Isometry3d> form_odometry(const Site& site, const std::string& seq, long last_id,
                                                 const OdometryParams& p);
 

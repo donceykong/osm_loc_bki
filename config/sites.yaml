@@ -1,6 +1,7 @@
 # What mapping adds to osm_localization's sites (third_party/osm_localization/config/sites.yaml:
 # where each site's sequences live, its georeference, pose / scan / label formats and OSM map).
-# Any site there runs; an entry here is needed only for what it does not say:
+# Any site there runs; an entry here is needed only for what it does not say, and serves every site
+# whose name starts with its own (kitti360_gt serves kitti360_gt_0002):
 #
 #   label_set      the label set (config/labels.yaml) of the site's own labels (flat or scores); sites
 #                  run with a segmentation model take the model's (config/labels.yaml models:)

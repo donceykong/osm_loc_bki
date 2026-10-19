@@ -57,12 +57,12 @@ std::vector<form::PointXYZf> range_image(const std::vector<float>& pc, const Odo
 
 std::map<long, Eigen::Isometry3d> form_odometry(const Site& site, const std::string& seq, long last_id,
                                                 const OdometryParams& p) {
+  // every scan from the first posed one to last_id: pose files can skip scans inside a run
+  // (KITTI-360's), which odometry should not jump
   const osmloc::Poses all = site.loc().read_poses(seq);
   std::vector<long> ids;
-  for (long id : all.ids) {
-    ids.push_back(id);
-    if (id == last_id) break;
-  }
+  for (long id = all.ids.front(); id <= last_id; ++id)
+    if (fs::exists(site.scan_path(seq, id))) ids.push_back(id);
   char tag[64];
   std::snprintf(tag, sizeof tag, "_form_%dx%d.npz", p.rows, p.cols);
   const fs::path path = fs::path(data_dir()) / "odometry" / (site.name + "_" + seq + tag);

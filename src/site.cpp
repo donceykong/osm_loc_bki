@@ -69,8 +69,16 @@ Site Site::load(const std::string& name) {
   s.loc_ = std::make_shared<const osmloc::Site>(osmloc::Site::load(name));
   s.name = name;
   s.map = s.loc_->map;
+  s.scans_ = YAML::LoadFile(osmloc::config_dir() + "/sites.yaml")[name]["scans"].as<std::string>();
+  // config/sites.yaml's entry: the site's own, else that of the longest site name it starts with
+  // (kitti360_gt_0002 takes kitti360_gt's)
   YAML::Node all = YAML::LoadFile(config_dir() + "/sites.yaml");
-  s.cfg_ = std::make_shared<YAML::Node>(all[name] ? all[name] : YAML::Node(YAML::NodeType::Map));
+  std::string key;
+  for (const auto& kv : all) {
+    const std::string k = kv.first.as<std::string>();
+    if (name.rfind(k, 0) == 0 && k.size() > key.size()) key = k;
+  }
+  s.cfg_ = std::make_shared<YAML::Node>(!key.empty() ? all[key] : YAML::Node(YAML::NodeType::Map));
   return s;
 }
 
@@ -129,6 +137,10 @@ std::vector<float> Site::load_alpha(const std::string& seq, long id, const std::
 }
 
 std::vector<float> Site::load_scan(const std::string& seq, long id) const { return loc_->load_scan(seq, id); }
+
+std::string Site::scan_path(const std::string& seq, long id) const {
+  return loc_->seq_dir(seq) + "/" + scans_ + "/" + stem(id);
+}
 
 std::vector<int32_t> Site::load_labels(const std::string& seq, long id, long n, const std::string& model) const {
   return loc_->load_labels(seq, id, n, model);
