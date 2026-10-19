@@ -1,7 +1,8 @@
 """The live 3D view of a run (pyvista): the OSM map draped over the ground, ground truth, the
 estimate, the robot and its front-end hits, and the semantic map as it grows: its voxels (one point
 each, class colours) and, with the nvblox backend, its TSDF mesh coloured by class. The camera
-follows the robot and keeps whatever angle and zoom you give it (drag, scroll).
+follows the newest settled (lag) pose, where the map is being built, and keeps whatever angle and
+zoom you give it (drag, scroll).
 
 Keys: v toggles the voxels, m the mesh, s the last mapped scan, g the ground (DEM <-> DSM).
 
@@ -262,7 +263,14 @@ class LiveView3D:
             M = np.eye(4)
             M[:3, 3] = np.r_[g, self.ground(g[None])[0] + 1.0]
             self.gt_dot.user_matrix = M
-            cam = self.pl.camera  # follow, keeping the user's angle and zoom
+            # follow the newest lag pose (the robot's until the first one settles), keeping the user's
+            # angle and zoom
+            lag = p.trajectory("lag")[: t + 1]
+            ok = np.flatnonzero(np.isfinite(lag[:, 0]))
+            if len(ok):
+                at = lag[ok[-1]] - self.origin
+                here = np.r_[at, self.ground(at[None])[0] + 1.5]
+            cam = self.pl.camera
             off = np.array(cam.position) - np.array(cam.focal_point)
             cam.focal_point, cam.position = tuple(here), tuple(here + off)
             cam.clipping_range = (1, 8000)
