@@ -71,6 +71,7 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.site)) {
     read(v, "truncation_vox", nv.truncation_vox), read(v, "free_space_mask", nv.free_space_mask);
     read(v, "free_distance", nv.free_distance), read(v, "interp_max_difference_vox", nv.interp_max_difference_vox);
     read(v, "nearest_max_dist_vox", nv.nearest_max_dist_vox), read(v, "every_keyframe", nv.every_keyframe);
+    read(v, "unified_memory", nv.unified_memory);
     if (v["elevation_deg"]) nv.min_elevation_deg = v["elevation_deg"][0].as<double>(), nv.max_elevation_deg = v["elevation_deg"][1].as<double>();
   }
   OsmParams op;

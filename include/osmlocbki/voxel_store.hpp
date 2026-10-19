@@ -48,6 +48,9 @@ struct NvbloxParams {
   bool every_keyframe = true;  // TSDF from every localization keyframe's scan, not only the mapped ones
   bool free_space_mask = true;
   double free_distance = 0.45;                      // m: a TSDF distance beyond this is free space
+  // the semantic and TSDF blocks in CUDA unified memory: the driver pages blocks out to host RAM when
+  // the GPU fills, so a map larger than the GPU still runs (only the blocks near the robot are hot)
+  bool unified_memory = true;
 };
 
 class VoxelStore {

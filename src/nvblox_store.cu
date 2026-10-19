@@ -210,6 +210,10 @@ __global__ void paint_kernel(SemanticBlock* const* blocks, nvblox::ColorBlock* c
   c.weight = 1.f;
 }
 
+nvblox::BlockMemoryPoolParams pool(const NvbloxParams& g) {
+  return nvblox::BlockMemoryPoolParams(g.unified_memory ? nvblox::MemoryType::kUnified : nvblox::MemoryType::kDevice);
+}
+
 class NvbloxStore : public VoxelStore {
  public:
   NvbloxStore(int nc, const StoreParams& p, const NvbloxParams& g)
@@ -217,8 +221,8 @@ class NvbloxStore : public VoxelStore {
         p_(p),
         g_(g),
         stream_(std::make_shared<nvblox::CudaStreamOwning>()),
-        mapper_(static_cast<float>(p.resolution), nvblox::BlockMemoryPoolParams(), nvblox::ProjectiveLayerType::kTsdf, stream_),
-        layer_(static_cast<float>(p.resolution), nvblox::BlockMemoryPoolParams()),
+        mapper_(static_cast<float>(p.resolution), pool(g), nvblox::ProjectiveLayerType::kTsdf, stream_),
+        layer_(static_cast<float>(p.resolution), pool(g)),
         lidar_(g.azimuth, g.elevation, 0.5f, static_cast<float>(radians(-g.min_elevation_deg)),
                static_cast<float>(radians(g.max_elevation_deg))) {
     if (nc_ > SemanticVoxel::kMaxClasses)

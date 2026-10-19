@@ -85,3 +85,14 @@ cu_main_campus:
   poses: {file: "{seq}_main_campus_REGISTERED_poses.csv", format: utm_csv}
   scans: lidar_bin/data
   labels: {flat: "{seq}_main_campus_lidar_labels", label_set: cu_multi}
+
+# CU-Multi north campus with CENet's labels (MCD classes; flat in the model's folder): sequence robot1.
+# It lies within the main campus map and survey, so it shares their map, database and DSM.
+cu_north_campus:
+  data_dir: datasets/CU_MULTI/north_campus
+  map: cu_main
+  map_bbox: [[40.0003, -105.2788], [40.0148, -105.2583]]
+  georef: {utm_fit: cu_north_campus_utm.json}
+  poses: {file: poses/poses_interpolated.csv, format: csv, id_col: "scan #"}
+  scans: lidar_bin/data
+  labels: {flat: inferred_labels/cenet_mcd, label_set: mcd}

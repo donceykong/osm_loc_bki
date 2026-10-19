@@ -43,6 +43,9 @@ $DATASET_PATH/datasets/mcd/kth/
 ```
 
 Ground-truth-label sites (`kth_gt`, `tuhh`, `ntu_gt`) read `<seq>/gt_labels/` and take no `--model`.
+`cu_north_campus` (CU-Multi, sequence `robot1`) reads CENet's MCD-class labels from
+`robot1/inferred_labels/cenet_mcd/` and also takes no `--model`; its georeference is a fit to the
+robot's GPS (1.4 m median residual), so errors under ~1.5 m there are within the reference's noise.
 
 Maps for KTH, TUHH, NTU and CU are included. For a new site, add it to `config/sites.yaml`, then:
 
@@ -151,8 +154,9 @@ voxel the TSDF sees as free space (`free_distance` in front of a surface) is lef
 voxels, which drops the kernel's smear into the air and the trails of objects that moved; `--mesh`
 writes the TSDF's mesh coloured by each voxel's class. Scoring (`--eval`) reads the evidence unmasked.
 The TSDF takes every localization keyframe's scan (1 m apart, at the same settled poses), not only the
-mapped ones, so the mesh is closed on the ground (`every_keyframe`; ~3 ms per keyframe). KTH day_09
-peaks at 5.3 GB of GPU memory.
+mapped ones, so the mesh is closed on the ground (`every_keyframe`; ~3 ms per keyframe). The blocks
+live in CUDA unified memory (`unified_memory`), so a map larger than the GPU pages out to host RAM
+instead of failing: CU north campus (3.3 km) holds 2.8 GB of blocks and fills the 8 GB card.
 
 Unlike the originals: OSM lines and points are buffered by their width (no libosmium); voxel
 downsampling uses exact keys (OSM-BKI's hash merges mirror-image voxels); ROS, the OSM count prior,
