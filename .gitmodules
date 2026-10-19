@@ -1,0 +1,4 @@
+[submodule "third_party/nvblox"]
+	path = third_party/nvblox
+	url = https://github.com/nvidia-isaac/nvblox.git
+	shallow = true

@@ -15,13 +15,14 @@ export DATASET_PATH=/path/to/disk         # the disk holding datasets/mcd/...
 
 Re-run `pip install -e .` after changing C++ code or moving the repository.
 
-**GPU mapping with nvblox (optional).** With a CUDA toolkit and an
-[nvblox](https://github.com/nvidia-isaac/nvblox) checkout next to this repository, the build adds an
-nvblox backend (`--mapper nvblox`; the first build takes a few minutes longer):
+**GPU mapping with nvblox (optional).** With a CUDA toolkit and the
+[nvblox](https://github.com/nvidia-isaac/nvblox) submodule (`third_party/nvblox`, pinned at
+`24eee49` and used unmodified), the build adds an nvblox backend (`--mapper nvblox`; the first build
+takes a few minutes longer):
 
 ```bash
 conda install -c conda-forge "cuda-version=13.0" cuda-nvcc cuda-cudart-dev cuda-cccl cuda-nvtx-dev libnpp-dev libcurand-dev
-GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/nvidia-isaac/nvblox.git ../nvblox   # tested at 24eee49
+GIT_LFS_SKIP_SMUDGE=1 git submodule update --init   # nvblox's LFS files (test data, images) are not needed
 pip install -e .                          # python -c "import osmlocbki; print(osmlocbki.have_nvblox())"
 ```
 

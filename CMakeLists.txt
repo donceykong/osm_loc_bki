@@ -30,7 +30,8 @@ option(OSMLOCBKI_AVX2 "Compile the numeric code with AVX2/FMA" ON)
 option(OSMLOCBKI_PYTHON "Build the Python module" ON)
 option(OSMLOCBKI_TESTS "Build the tests" ON)
 set(OSMLOCBKI_NVBLOX AUTO CACHE STRING "The nvblox (GPU) map backend: AUTO (when CUDA and nvblox are found), ON, OFF")
-set(NVBLOX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../nvblox" CACHE PATH "An nvblox checkout (github.com/nvidia-isaac/nvblox)")
+# nvblox is pinned as a submodule (third_party/nvblox); git submodule update --init fetches it
+set(NVBLOX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nvblox" CACHE PATH "An nvblox checkout (github.com/nvidia-isaac/nvblox)")
 set(OSMLOCBKI_MAX_CLASSES 9 CACHE STRING "Classes an nvblox semantic voxel holds (config/labels.yaml has 9)")
 
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
@@ -56,14 +57,22 @@ if(NOT OSMLOCBKI_NVBLOX STREQUAL "OFF")
   if(CMAKE_CUDA_COMPILER AND EXISTS "${NVBLOX_SOURCE_DIR}/nvblox/CMakeLists.txt")
     set(_nvblox ON)
   elseif(OSMLOCBKI_NVBLOX STREQUAL "ON")
-    message(FATAL_ERROR "OSMLOCBKI_NVBLOX=ON needs a CUDA compiler and an nvblox checkout at NVBLOX_SOURCE_DIR (${NVBLOX_SOURCE_DIR})")
+    message(FATAL_ERROR "OSMLOCBKI_NVBLOX=ON needs a CUDA compiler and an nvblox checkout at NVBLOX_SOURCE_DIR "
+                        "(${NVBLOX_SOURCE_DIR}): GIT_LFS_SKIP_SMUDGE=1 git submodule update --init")
+  elseif(CMAKE_CUDA_COMPILER)
+    message(STATUS "osmlocbki: nvblox backend OFF: no checkout at ${NVBLOX_SOURCE_DIR} (GIT_LFS_SKIP_SMUDGE=1 git submodule update --init)")
   endif()
 endif()
 if(_nvblox)
-  set(_cuda_arch_given ${CMAKE_CUDA_ARCHITECTURES})
+  # this machine's GPU unless given: decided on the first configure and cached, as enable_language
+  # otherwise caches CMake's default (sm_75), which a later configure would take as given and the
+  # driver would JIT from PTX on every newer GPU
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(_cuda_arch_auto ON)
+  endif()
   enable_language(CUDA)
-  if(NOT _cuda_arch_given AND CMAKE_CUDA_ARCHITECTURES_NATIVE)
-    set(CMAKE_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES_NATIVE})  # this machine's GPU
+  if(_cuda_arch_auto AND CMAKE_CUDA_ARCHITECTURES_NATIVE)
+    set(CMAKE_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES_NATIVE} CACHE STRING "CUDA architectures" FORCE)
   endif()
   # the nvblox library alone, with this build's Eigen
   set(BUILD_TESTING OFF)
