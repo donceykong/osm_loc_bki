@@ -37,6 +37,25 @@ verdict, the better of the two: KTH day_09 gets 414k survey voxels, the datum es
 -0.04 m (here -0.06 m offline), and the map's score on the LiDAR scans is unchanged (mIoU 0.381 with
 and without; LiDAR outweighs the survey where both are), at ~55 ms more per mapped scan.
 
+## From rasters (KITTI-360)
+
+Sites whose survey comes as GeoTIFFs build the same model with `raster_survey.py` (needs rasterio,
+pyproj, pyyaml; not in `environment.yaml`): the DSM's surface every 0.25 m plus wall points at the
+edges of building-like cells, cropped to the site's `map_bbox` + 100 m.
+
+```bash
+G=$DATASET_PATH/datasets/kitti360/geospatial/kitti360_DGM025-2026
+python experiments/dsm/raster_survey.py --site kitti360 \
+    --dsm $G/kitti360_DOM1/merged_dsm.tif --dem $G/kitti360_DGM025/merged_dem.tif
+# -> data/surface/kitti360_0000_epsg32632.npz (1.2 x 1.3 km, 25.7M points, 366 MB; 5 s)
+```
+
+KITTI-360 drive 0000 (2026-10-18): the rasters (ETRS89 / UTM 32N, DHHN2016 heights) need no
+correction. LiDAR points above the sensor at ground-truth poses fall on elevated DSM cells most at
+zero shift (82.6%, falling off evenly within +-2 m), and the sensor sits a median 1.62 m over the
+DEM (1.73 m nominal); in the loop the datum settles at -0.14..-0.22 m. Over the first 500 keyframes
+(lidarrv_kitti360) the map scores mIoU 0.619 with and without the survey's ~800k voxels.
+
 ## Next
 
 - Drop the vehicle class from OSM support at non-ground survey voxels over parking (canopy).
