@@ -6,18 +6,16 @@ zoom you give it (drag, scroll).
 
 Keys: v toggles the voxels, m the mesh, s the last mapped scan, g the ground (DEM <-> DSM).
 
-The ground is the site's airborne survey (data/surface/<map>_epsg<zone>.npz) where there is one,
+The ground is the site's airborne survey (<its data_dir>/surface/<map>_epsg<zone>.npz) where there is one,
 lifted onto the map's heights: its terrain (DEM), or its surface (DSM: roofs, canopy) with the OSM
 draped over it; else a plane under the first mapped scan. Everything is drawn in the
 map frame (UTM - map origin).
 """
 
-import glob
 import os
 
 import numpy as np
 
-from . import Site, data_dir
 
 # osmloc's view colours, RGB 0..255: dark backdrop, OSM in greys and muted tints
 BG = (28, 28, 28)
@@ -39,10 +37,8 @@ class Ground:
 
     def __init__(self, pipe):
         self.p, self.dem, self.dsm = pipe, None, None
-        site = Site(pipe.site)
-        hits = sorted(glob.glob(os.path.join(data_dir(), "surface", f"{site.map}_epsg*.npz")))
-        if hits:
-            with np.load(hits[0]) as z:
+        if os.path.exists(pipe.survey_path):
+            with np.load(pipe.survey_path) as z:
                 self.dem, self.dsm, self.res = z["dem"], z["dsm"], float(z["res"])
                 self.lo = z["origin"] - pipe.map_origin  # the DEM's corner in the map frame
         self.z0 = None  # plane height / datum shift, from the first mapped scan

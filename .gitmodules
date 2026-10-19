@@ -6,3 +6,6 @@
 	path = third_party/osm_localization
 	url = git@github.com:donceykong/osm_localization.git
 	branch = use_gtsam
+[submodule "third_party/form"]
+	path = third_party/form
+	url = https://github.com/rpl-cmu/form.git

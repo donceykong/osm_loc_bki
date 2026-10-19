@@ -1,6 +1,7 @@
 // End to end on real sequences; needs $DATASET_PATH (and is skipped without the data).
-//   MCD TUHH day_03, ground-truth labels, exact odometry: osm_localization localizes it through the
-//   pipeline, and the map built at the lag poses agrees with the map built at ground truth
+//   MCD TUHH day_03, ground-truth labels: osm_localization localizes it through the pipeline with
+//   ground truth's odometry (its README's row) and with FORM's, and the map built at the lag poses
+//   agrees with the map built at ground truth
 #include <cstdlib>
 #include <filesystem>
 
@@ -23,13 +24,12 @@ double median(std::vector<double> v) {
 
 }  // namespace
 
-TEST(tuhh_day_03_localizes) {
-  if (!have("datasets/mcd/tuhh/tuhh_day_03")) {
-    std::printf("  skipped: needs $DATASET_PATH with MCD TUHH\n");
-    return;
-  }
+namespace {
+
+// within 5 m (rigid, hybrid, lag) and the median hybrid error of a whole TUHH day_03 run
+void localize_tuhh(const std::string& odometry, double max_median) {
   PipelineConfig c;
-  c.loc.site = "tuhh", c.loc.seq = "tuhh_day_03", c.map = false;
+  c.loc.site = "tuhh", c.loc.seq = "tuhh_day_03", c.odometry_source = odometry, c.map = false;
   Pipeline p(c);
   while (p.step()) {
   }
@@ -48,12 +48,23 @@ TEST(tuhh_day_03_localizes) {
     for (long t = 0; t < p.size(); ++t) e.push_back((xy.row(t) - p.gt().row(t)).norm());
     return median(e);
   };
-  std::printf("  within 5 m: rigid %.3f, hybrid %.3f, lag %.3f; median hybrid %.2f m\n", within5("rigid"), within5("hybrid"),
-              within5("lag"), med("hybrid"));
+  std::printf("  %s odometry: within 5 m: rigid %.3f, hybrid %.3f, lag %.3f; median hybrid %.2f m\n", odometry.c_str(),
+              within5("rigid"), within5("hybrid"), within5("lag"), med("hybrid"));
   CHECK(within5("rigid") >= 0.93);
   CHECK(within5("hybrid") >= 0.93);
   CHECK(within5("lag") >= 0.99);
-  CHECK(med("hybrid") < 0.7);
+  CHECK(med("hybrid") < max_median);
+}
+
+}  // namespace
+
+TEST(tuhh_day_03_localizes) {
+  if (!have("datasets/mcd/tuhh/tuhh_day_03")) {
+    std::printf("  skipped: needs $DATASET_PATH with MCD TUHH\n");
+    return;
+  }
+  localize_tuhh("gt", 0.7);    // osm_localization's own result
+  localize_tuhh("form", 1.0);  // with estimated odometry (0.93 m)
 }
 
 TEST(tuhh_day_03_maps_at_the_found_poses) {

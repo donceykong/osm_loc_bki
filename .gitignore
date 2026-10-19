@@ -16,6 +16,7 @@ __pycache__/
 data/*.npz
 data/maps/*.osm
 data/localization/
+data/odometry/
 
 # scratch configs and editor / OS files
 config/_tmp_*

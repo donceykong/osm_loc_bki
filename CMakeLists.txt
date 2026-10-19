@@ -110,13 +110,21 @@ add_subdirectory(third_party/osm_localization EXCLUDE_FROM_ALL)
 set(SKBUILD "${_skbuild}")
 target_compile_options(osmloc PRIVATE -w)
 
+# FORM (third_party/form, a submodule): LiDAR odometry, estimated from the scans instead of read
+# from ground truth
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/form/CMakeLists.txt")
+  message(FATAL_ERROR "third_party/form is missing: git submodule update --init")
+endif()
+add_subdirectory(third_party/form EXCLUDE_FROM_ALL)
+target_compile_options(FORM PRIVATE -w)
+
 add_library(osmlocbki STATIC
-  src/npz.cpp src/geo.cpp src/site.cpp src/labels.cpp
+  src/npz.cpp src/geo.cpp src/site.cpp src/labels.cpp src/odometry.cpp
   src/osm_prior.cpp src/ground.cpp src/voxel_store_cpu.cpp src/semantic_map.cpp src/survey.cpp
   src/pipeline.cpp)
 target_include_directories(osmlocbki PUBLIC include)
 target_link_libraries(osmlocbki PUBLIC Eigen3::Eigen OpenMP::OpenMP_CXX yaml-cpp::yaml-cpp
-                      nlohmann_json::nlohmann_json ZLIB::ZLIB osmloc osmlocbki_nvblox PRIVATE patchworkpp)
+                      nlohmann_json::nlohmann_json ZLIB::ZLIB osmloc osmlocbki_nvblox PRIVATE patchworkpp FORM)
 # where config/ and data/ are found unless $OSMLOCBKI_ROOT says otherwise
 target_compile_definitions(osmlocbki PRIVATE OSMLOCBKI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 # Every file (Patchwork++ included: it trades Eigen objects with us) allocates and frees Eigen heap

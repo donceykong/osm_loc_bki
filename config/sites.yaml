@@ -28,9 +28,18 @@ ntu_gt:
   label_set: mcd
   lidar_to_body: {file: atv_calib.yaml, key: body.os_sensor.T}
 
-# CU-Multi: its own labels (only their building class is in config/labels.yaml so far)
+# CU-Multi: its own labels (only their building class is in config/labels.yaml so far); its Ouster
+# (128 x 512) sees -15.5 .. 18 deg
 cu_main_campus:
   label_set: cu_multi
+  lidar: {azimuth: 512, elevation: 128, elevation_deg: [-15.5, 18.0]}
+
+cu_kittredge_loop:
+  label_set: cu_multi
+  lidar: {azimuth: 512, elevation: 128, elevation_deg: [-15.5, 18.0]}
+
+cu_north_campus:
+  lidar: {azimuth: 512, elevation: 128, elevation_deg: [-15.5, 18.0]}
 
 kitti360:
   lidar: {azimuth: 1024, elevation: 64, elevation_deg: [-24.9, 2.0]}   # Velodyne HDL-64E

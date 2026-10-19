@@ -28,9 +28,12 @@ def main():
     ap.add_argument("--model", default="", help="segmentation model, for sites with inferred labels")
     ap.add_argument("--pose", default="lag", choices=["lag", "filtered", "gt"], help="pose scans are mapped at")
     ap.add_argument("--strength", type=float, default=-1, help="OSM strength (default: config/mapping.yaml)")
-    ap.add_argument("--odometry", default="near_exact", choices=["near_exact", "drifting"])
-    ap.add_argument("--scale-bias", type=float, default=0.0, help="simulated odometry scale drift")
-    ap.add_argument("--yaw-rw", type=float, default=0.0, help="simulated heading random walk, deg/sqrt(m)")
+    ap.add_argument("--odometry-source", default="form", choices=["form", "gt"],
+                    help="odometry: FORM LiDAR odometry over every scan (default), or ground truth's")
+    ap.add_argument("--odometry", default="auto", choices=["auto", "near_exact", "drifting"],
+                    help="pose-graph odometry noise preset (auto: drifting with FORM, near_exact with ground truth)")
+    ap.add_argument("--scale-bias", type=float, default=0.0, help="simulated odometry scale drift (--odometry-source gt)")
+    ap.add_argument("--yaw-rw", type=float, default=0.0, help="simulated heading random walk, deg/sqrt(m) (--odometry-source gt)")
     ap.add_argument("--max-kf", type=int, default=0)
     ap.add_argument("--map-spacing", type=float, default=5.0)
     ap.add_argument("--surface", default="", help="airborne survey .npz projected into the map, or auto "
@@ -59,7 +62,8 @@ def main():
     p = osmlocbki.Pipeline(a.site, a.seq, model=a.model, pose=a.pose, strength=a.strength, odometry=a.odometry,
                            scale_bias=a.scale_bias, yaw_rw=a.yaw_rw, max_kf=a.max_kf, map_spacing=a.map_spacing,
                            building_ids=a.building_ids, surface=a.surface, mapper=a.mapper,
-                           loc_surface=a.loc_surface, lock_agree_m=a.lock_agree_m)
+                           loc_surface=a.loc_surface, lock_agree_m=a.lock_agree_m,
+                           odometry_source=a.odometry_source)
     output = "filtered" if a.pose == "filtered" else "lag" if a.pose == "lag" else "graph"
     view = None
     if not a.no_view or a.save:

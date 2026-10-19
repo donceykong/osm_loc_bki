@@ -35,7 +35,7 @@ CELL = 25.0  # m: the crop bins src/survey.cpp expects (Survey::kCell)
 
 
 def site_box(site, margin):
-    """The site's map_bbox in its UTM zone, grown by margin: (epsg, x0, y0, x1, y1)."""
+    """The site's map_bbox in its UTM zone, grown by margin: (map, data_dir, epsg, x0, y0, x1, y1)."""
     with open(os.path.join(ROOT, "third_party", "osm_localization", "config", "sites.yaml")) as f:
         sites = yaml.safe_load(f)
     s = sites[site]
@@ -48,7 +48,7 @@ def site_box(site, margin):
     epsg = (32600 if lat0 >= 0 else 32700) + zone
     utm = pyproj.Transformer.from_crs(4326, epsg, always_xy=True)
     xs, ys = utm.transform([lon0, lon1, lon0, lon1], [lat0, lat0, lat1, lat1])
-    return s["map"], epsg, min(xs) - margin, min(ys) - margin, max(xs) + margin, max(ys) + margin
+    return s["map"], s["data_dir"], epsg, min(xs) - margin, min(ys) - margin, max(xs) + margin, max(ys) + margin
 
 
 def read(path, x0, y0, x1, y1):
@@ -149,10 +149,10 @@ def main():
     ap.add_argument("--wall-step", type=float, default=1.0, help="walls where a solid cell drops more than this, m")
     ap.add_argument("--shift", type=float, nargs=2, default=[0.0, 0.0], metavar=("DX", "DY"),
                     help="added to the rasters' x, y to reach the site's frame, m")
-    ap.add_argument("--out", help="default: data/surface/<map>_epsg<zone>.npz")
+    ap.add_argument("--out", help="default: $DATASET_PATH/<the site's data_dir>/surface/<map>_epsg<zone>.npz")
     a = ap.parse_args()
 
-    name, epsg, x0, y0, x1, y1 = site_box(a.site, a.margin)
+    name, data_dir, epsg, x0, y0, x1, y1 = site_box(a.site, a.margin)
     origin = np.floor(np.array([x0, y0]) / a.res) * a.res
     shape = tuple(int(v) for v in np.ceil((np.array([x1, y1]) - origin) / a.res))
     src = origin - a.shift  # the grid in the rasters' frame
@@ -177,7 +177,7 @@ def main():
     pts, key = pts[order], key[order]
     starts = np.searchsorted(key, np.arange(bins[0] * bins[1] + 1)).astype(np.int64)
 
-    out = a.out or os.path.join(ROOT, "data", "surface", f"{name}_epsg{epsg}.npz")
+    out = a.out or os.path.join(os.environ["DATASET_PATH"], data_dir, "surface", f"{name}_epsg{epsg}.npz")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     np.savez(out, origin=origin.astype(np.float64), res=np.float64(a.res), epsg=np.int64(epsg), dsm=dsm, dem=dem,
              solid=solid, pts=pts, bins=bins, starts=starts)

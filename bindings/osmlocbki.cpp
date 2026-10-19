@@ -23,17 +23,17 @@ std::unique_ptr<Pipeline> make_pipeline(const std::string& site, const std::stri
                                         double scale_bias, double yaw_rw, unsigned seed, long max_kf, double spacing,
                                         double map_spacing, double lock_m, double lag_m, std::vector<int> building_ids,
                                         const std::string& mapping, const std::string& surface,
-                                        const std::string& mapper, bool loc_surface, double lock_agree_m) {
+                                        const std::string& mapper, bool loc_surface, double lock_agree_m,
+                                        const std::string& odometry_source) {
   PipelineConfig c;
   osmloc::RunConfig& l = c.loc;
   l.site = site, l.seq = seq, l.model = model;
-  if (odometry != "near_exact" && odometry != "drifting") throw std::invalid_argument("odometry: near_exact or drifting");
-  l.graph = odometry == "drifting" ? osmloc::GraphParams::drifting() : osmloc::GraphParams();
+  c.graph_preset = odometry;
   l.odometry.scale_bias = scale_bias, l.odometry.yaw_rw = yaw_rw, l.odometry.seed = seed;
   l.max_kf = max_kf, l.spacing = spacing, l.lag_m = lag_m, l.building_ids = std::move(building_ids);
   l.surface = loc_surface;
   c.pose = pose, c.map = map, c.strength = strength, c.map_spacing = map_spacing, c.lock_m = lock_m;
-  c.lock_agree_m = lock_agree_m;
+  c.lock_agree_m = lock_agree_m, c.odometry_source = odometry_source;
   c.mapping = mapping, c.surface = surface, c.mapper = mapper;
   return std::make_unique<Pipeline>(c);
 }
@@ -125,18 +125,21 @@ PYBIND11_MODULE(_osmlocbki, m) {
       .def_readonly("map", &Site::map)
       .def_property_readonly("map_bbox", [](const Site& s) { return s.loc().map_bbox; })
       .def("seq_dir", [](const Site& s, const std::string& seq) { return s.loc().seq_dir(seq); }, py::arg("seq"))
-      .def("label_set", &Site::label_set, py::arg("model") = "");
+      .def("label_set", &Site::label_set, py::arg("model") = "")
+      .def("survey_path", &Site::survey_path, py::arg("epsg"), "The site's survey model: <data_dir>/surface/<map>_epsg<zone>.npz.");
 
   py::class_<Pipeline>(m, "Pipeline")
       .def(py::init(&make_pipeline), py::arg("site"), py::arg("seq"), py::arg("model") = "", py::arg("pose") = "lag",
-           py::arg("map") = true, py::arg("strength") = -1.0, py::arg("odometry") = "near_exact",
+           py::arg("map") = true, py::arg("strength") = -1.0, py::arg("odometry") = "auto",
            py::arg("scale_bias") = 0.0, py::arg("yaw_rw") = 0.0, py::arg("seed") = 1u, py::arg("max_kf") = 0,
            py::arg("spacing") = 1.0, py::arg("map_spacing") = 5.0, py::arg("lock_m") = 100.0, py::arg("lag_m") = 60.0,
            py::arg("building_ids") = std::vector<int>{}, py::arg("mapping") = "mapping.yaml", py::arg("surface") = "",
            py::arg("mapper") = "", py::arg("loc_surface") = false, py::arg("lock_agree_m") = 2.0,
+           py::arg("odometry_source") = "form",
            "Localize a sequence keyframe by keyframe (osm_localization) and map it with OSM-BKI (see pipeline.hpp).\n"
-           "pose: lag | filtered | gt; strength: OSM strength (< 0: config/mapping.yaml's); odometry: near_exact or\n"
-           "drifting graph preset, with simulated drift scale_bias (fraction) and yaw_rw (deg / sqrt(m)).\n"
+           "pose: lag | filtered | gt; strength: OSM strength (< 0: config/mapping.yaml's); odometry: the graph's odometry\n"
+           "noise preset, near_exact or drifting (auto: drifting for FORM's odometry, near_exact for ground truth's), with simulated drift scale_bias (fraction) and yaw_rw (deg / sqrt(m)), which apply to\n"
+           "odometry_source='gt' (ground truth's odometry); 'form' (the default) estimates it with FORM over every scan.\n"
            "surface: an airborne survey .npz projected into the map around each mapped pose ('auto':\n"
            "data/surface/<map>_epsg<zone>.npz). mapper: cpu | nvblox (GPU, with a TSDF; '': config/mapping.yaml's).\n"
            "loc_surface: osm_localization registers against the site's airborne survey (its sites.yaml surface:).")
@@ -148,6 +151,7 @@ PYBIND11_MODULE(_osmlocbki, m) {
       .def_property_readonly("seq", [](const Pipeline& p) { return p.config().loc.seq; })
       .def_property_readonly("map_origin", [](const Pipeline& p) { return p.semantic_map()->utm_origin(); },
                              "UTM of the map frame's origin.")
+      .def_property_readonly("survey_path", &Pipeline::survey_path, "Where the site's survey model is (or would be).")
       .def_property_readonly("t", &Pipeline::t)
       .def_property_readonly("size", &Pipeline::size)
       .def_property_readonly("locked", &Pipeline::locked)

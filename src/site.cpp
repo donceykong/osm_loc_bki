@@ -45,14 +45,11 @@ std::string stem(long id) {
 }
 
 // osm_localization's files go to <data>/localization, apart from ours: its map GeoJSON (its own
-// converter's, written by python -m osmlocbki.osm convert), OSM databases and scan descriptors; it
-// reads the survey models from ours
+// converter's, written by python -m osmlocbki.osm convert), OSM databases and scan descriptors
 void share_data_with_osm_localization() {
   if (!env("OSM_LOC_DATA").empty()) return;
   const fs::path d = fs::path(data_dir()) / "localization";
   fs::create_directories(d / "maps");
-  fs::create_directories(fs::path(data_dir()) / "surface");
-  if (!fs::exists(fs::symlink_status(d / "surface"))) fs::create_directory_symlink(fs::path("..") / "surface", d / "surface");
   setenv("OSM_LOC_DATA", d.c_str(), 1);
 }
 
@@ -78,6 +75,10 @@ Site Site::load(const std::string& name) {
 }
 
 std::string Site::map_prefix() const { return data_dir() + "/maps/" + map; }
+
+std::string Site::survey_path(int epsg) const {
+  return loc_->root() + "/surface/" + map + "_epsg" + std::to_string(epsg) + ".npz";
+}
 
 std::string Site::label_set(const std::string& model) const {
   if ((*cfg_)["label_set"]) return (*cfg_)["label_set"].as<std::string>();
@@ -136,22 +137,28 @@ std::vector<int32_t> Site::load_labels(const std::string& seq, long id, long n, 
 // ---- frames --------------------------------------------------------------------------------
 
 Frames::Frames(const Site& site, const std::string& seq, const std::vector<long>& keyframe_ids,
-               const std::set<long>& extra_ids, int epsg) {
+               const std::set<long>& extra_ids, int epsg, const std::map<long, Eigen::Isometry3d>* odometry) {
   osmloc::Poses all = site.loc().read_poses(seq);
   std::map<long, int> kf;
   for (size_t k = 0; k < keyframe_ids.size(); ++k) kf[keyframe_ids[k]] = static_cast<int>(k);
   const auto X = site.lidar_to_body();
   of_keyframe.resize(keyframe_ids.size());
-  std::vector<Vec3> at;  // the LiDAR's world x, y, heading (deg)
+  std::vector<Vec3> at, gt_at;  // the LiDAR's world x, y, heading (deg): odometry's, ground truth's
   int cur = -1;
   for (size_t i = 0; i < all.ids.size(); ++i) {
     const long id = all.ids[i];
     auto k = kf.find(id);
     if (k != kf.end()) cur = k->second;
     if (cur < 0 || (k == kf.end() && !extra_ids.count(id))) continue;
+    if (odometry && !odometry->count(id)) break;  // past the odometry's last scan
     Eigen::Matrix3d R = all.q[i].normalized().toRotationMatrix();
     Vec3 p = all.p.row(i).transpose();
     if (X) p += R * X->block<3, 1>(0, 3), R = R * X->block<3, 3>(0, 0);  // body -> lidar
+    gt_at.emplace_back(p[0], p[1], degrees(std::atan2(R(1, 0), R(0, 0))));
+    if (odometry) {
+      const Eigen::Isometry3d& T = odometry->at(id);
+      R = T.rotation(), p = T.translation();
+    }
     const double psi = degrees(std::atan2(R(1, 0), R(0, 0)));
     of_keyframe[cur].push_back(static_cast<long>(scan_id.size()));
     scan_id.push_back(id);
@@ -161,10 +168,10 @@ Frames::Frames(const Site& site, const std::string& seq, const std::vector<long>
     z.push_back(p[2]);
     at.emplace_back(p[0], p[1], psi);
   }
-  if (static_cast<long>(std::count_if(keyframe.begin(), keyframe.end(), [](int k) { return k >= 0; })) !=
-      static_cast<long>(keyframe_ids.size()))
-    throw std::runtime_error(site.name + "/" + seq + ": a localization keyframe is missing from the poses");
   const long n = static_cast<long>(size());
+  if (!odometry && std::count_if(keyframe.begin(), keyframe.end(), [](int k) { return k >= 0; }) !=
+                       static_cast<long>(keyframe_ids.size()))
+    throw std::runtime_error(site.name + "/" + seq + ": a localization keyframe is missing from the poses");
   std::vector<int> first(keyframe_ids.size(), -1);
   for (long f = 0; f < n; ++f)
     if (keyframe[f] >= 0) first[keyframe[f]] = static_cast<int>(f);
@@ -178,7 +185,7 @@ Frames::Frames(const Site& site, const std::string& seq, const std::vector<long>
   // ground truth through the site's georeference; headings rotated by the grid's angle to the
   // world frame (a fit over the run: the georeference is rigid or near it at this scale)
   MatX2 xy(n, 2);
-  for (long f = 0; f < n; ++f) xy.row(f) << at[f][0], at[f][1];
+  for (long f = 0; f < n; ++f) xy.row(f) << gt_at[f][0], gt_at[f][1];
   MatX2 ll = site.loc().latlon(seq, scan_id, xy);
   gt_xy.resize(n, 2);
   for (long f = 0; f < n; ++f) gt_xy.row(f) = to_utm(ll(f, 0), ll(f, 1), epsg).transpose();
@@ -191,7 +198,7 @@ Frames::Frames(const Site& site, const std::string& seq, const std::vector<long>
     }
   }
   const double grid = n > 1 ? degrees(std::atan2(ss, sc)) : 0.0;
-  for (long f = 0; f < n; ++f) gt_psi.push_back(pymod(at[f][2] + grid, 360.0));
+  for (long f = 0; f < n; ++f) gt_psi.push_back(pymod(gt_at[f][2] + grid, 360.0));
 }
 
 void Frames::pose(long f, const Vec2& axy, double apsi, Vec2& xy, double& psi) const {

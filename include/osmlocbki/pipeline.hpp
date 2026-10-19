@@ -3,7 +3,9 @@
 // built from the scans at the poses it finds.
 //
 // Per keyframe (every `loc.spacing` m) osm_localization's run localizes the scan from its building
-// descriptor and the odometry since the previous keyframe. The scans to map (every `map_spacing` m,
+// descriptor and the odometry since the previous keyframe: FORM's LiDAR odometry over every scan
+// (odometry_source = form, the default; its poses also level and place the mapped scans), or
+// ground truth's (gt, with loc.odometry's simulated drift). The scans to map (every `map_spacing` m,
 // among the scans the segmentation model exported class distributions for) are placed off the
 // keyframe at or before them (Frames) once that keyframe's pose is ready, while the localizer is
 // locked:
@@ -39,6 +41,10 @@ struct PipelineConfig {
   // graph, lag, surface registration, ...); its building ids default to the label set's
   // (Taxonomy::building_ids), and it never opens its own view
   osmloc::RunConfig loc;
+  std::string odometry_source = "form";  // form | gt
+  // loc.graph's odometry noise: near_exact (GraphParams()), drifting (GraphParams::drifting()), or auto:
+  // drifting for FORM's odometry (TUHH day_03: mIoU 0.73, near_exact 0.57), near_exact for ground truth's
+  std::string graph_preset = "auto";
   // mapping
   bool map = true;
   std::string pose = "lag";       // lag | filtered | gt
@@ -77,6 +83,7 @@ class Pipeline {
   const osmloc::Localizer& localizer() const { return run_->localizer(); }
   const std::vector<long>& keyframe_ids() const { return kf_ids_; }
   const OsmMap& osm() const { return osm_; }
+  std::string survey_path() const { return site_.survey_path(osm_.epsg); }  // where the site's survey model is (or would be)
   const Taxonomy& taxonomy() const { return tax_; }
   const SemanticMap* semantic_map() const { return map_.get(); }
   const OsmPrior* osm_prior() const { return prior_.get(); }  // null without a confusion matrix
@@ -117,6 +124,7 @@ class Pipeline {
   std::unique_ptr<osmloc::Run> run_;
   std::vector<long> kf_ids_;
   std::unique_ptr<Frames> frames_;
+  std::vector<osmloc::OdometryStep> odo_;  // FORM's, per keyframe (empty: ground truth's, osm_localization's)
   MatX2 gt_;
   std::vector<double> gt_psi_;
   long T_ = 0, t_ = -1, settled_ = -1;  // settled_: the newest keyframe whose lag pose is settled

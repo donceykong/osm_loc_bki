@@ -9,8 +9,11 @@
 
 #include "osmloc/database.hpp"
 #include "osmloc/site.hpp"
+#include "osmlocbki/odometry.hpp"
 
 namespace olb {
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -55,21 +58,60 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.loc.site
   to_common_ = tax_.mapping(label_set);
   if (c_.loc.building_ids.empty()) c_.loc.building_ids = tax_.building_ids(label_set);
   c_.loc.view = false;
+  if (c_.odometry_source != "form" && c_.odometry_source != "gt") throw std::invalid_argument("odometry source: form or gt");
+  const std::string& preset = c_.graph_preset;
+  if (preset != "auto" && preset != "near_exact" && preset != "drifting")
+    throw std::invalid_argument("graph preset: auto, near_exact or drifting");
+  const bool drifting = preset == "drifting" || (preset == "auto" && c_.odometry_source == "form");
+  c_.loc.graph = drifting ? osmloc::GraphParams::drifting() : osmloc::GraphParams();
   for (const char* layer : {"_buildings.geojson", "_roads.geojson"})
     if (!std::filesystem::exists(site_.loc().map_prefix() + layer))
       throw std::runtime_error("no " + site_.loc().map_prefix() + layer + " for osm_localization: python -m osmlocbki.osm convert --site " +
                                site_.name);
+  osm_ = load_map(site_.map_prefix());
   build_database_in_a_box(site_.loc(), c_.loc.db);
+  if (c_.loc.surface) {  // osm_localization reads the survey from its data directory: a link to the dataset's
+    const fs::path link = fs::path(osmloc::data_dir()) / "surface" / fs::path(site_.survey_path(osm_.epsg)).filename();
+    fs::create_directories(link.parent_path());
+    if (!fs::exists(fs::symlink_status(link))) fs::create_symlink(site_.survey_path(osm_.epsg), link);
+  }
   run_ = std::make_unique<osmloc::Run>(c_.loc);
   T_ = run_->size();
   // osm_localization's keyframes (its Run chooses them the same way from the same arguments)
   const auto all_kf = osmloc::Sequence(site_.loc(), seq, c_.loc.model, c_.loc.spacing).scan_ids;
   kf_ids_.assign(all_kf.begin(), all_kf.begin() + T_);
-  osm_ = load_map(site_.map_prefix());
   // the scans the model exported class distributions for are the ones mapped; they need not be keyframes
   auto alpha = site_.alpha_scans(seq, c_.loc.model);
   alpha_ = alpha.has_value();
-  frames_ = std::make_unique<Frames>(site_, seq, all_kf, alpha_ ? *alpha : std::set<long>{}, osm_.epsg);
+  std::map<long, Eigen::Isometry3d> odometry;
+  if (c_.odometry_source == "form") {
+    OdometryParams op;
+    if (auto l = site_.lidar()) op.rows = l->elevation, op.cols = l->azimuth;
+    odometry = form_odometry(site_, seq, kf_ids_.back(), op);
+    // into the world: ground truth's LiDAR pose at the first scan only (gravity and a start, as an
+    // IMU and a known start would give them)
+    const osmloc::Poses all = site_.loc().read_poses(seq);
+    const long first = odometry.begin()->first;
+    const size_t i = std::find(all.ids.begin(), all.ids.end(), first) - all.ids.begin();
+    Eigen::Isometry3d W = Eigen::Isometry3d::Identity();
+    W.linear() = all.q[i].normalized().toRotationMatrix();
+    W.translation() = all.p.row(i).transpose();
+    if (auto X = site_.lidar_to_body()) W = W * Eigen::Isometry3d(*X);
+    for (auto& kv : odometry) kv.second = W * kv.second;
+    // the keyframes' steps: the planar motion in the previous keyframe's heading frame
+    odo_.push_back({std::nullopt, 0.0});
+    auto planar = [&](long id) {
+      const Eigen::Isometry3d& T = odometry.at(id);
+      return Vec3(T.translation()[0], T.translation()[1], std::atan2(T.linear()(1, 0), T.linear()(0, 0)));
+    };
+    for (long t = 1; t < T_; ++t) {
+      const Vec3 a = planar(kf_ids_[t - 1]), b = planar(kf_ids_[t]);
+      const double c = std::cos(a[2]), s = std::sin(a[2]), dx = b[0] - a[0], dy = b[1] - a[1];
+      odo_.push_back({Vec2(c * dx + s * dy, -s * dx + c * dy), wrap180(degrees(b[2] - a[2]))});
+    }
+  }
+  frames_ = std::make_unique<Frames>(site_, seq, all_kf, alpha_ ? *alpha : std::set<long>{}, osm_.epsg,
+                                     odometry.empty() ? nullptr : &odometry);
   gt_.resize(T_, 2);
   gt_psi_.resize(T_);
   for (long f = 0; f < static_cast<long>(frames_->size()); ++f) {
@@ -78,8 +120,9 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.loc.site
   }
   std::string ids;
   for (int b : c_.loc.building_ids) ids += (ids.empty() ? "" : ",") + std::to_string(b);
-  std::fprintf(stderr, "%s/%s: %ld keyframes, %zu buildings, %zu other OSM features; label set %s, building ids %s\n",
-               c_.loc.site.c_str(), seq.c_str(), T_, osm_.buildings.size(), osm_.features.size(), label_set.c_str(), ids.c_str());
+  std::fprintf(stderr, "%s/%s: %ld keyframes, %s odometry, %zu buildings, %zu other OSM features; label set %s, building ids %s\n",
+               c_.loc.site.c_str(), seq.c_str(), T_, odo_.empty() ? "ground-truth" : "FORM", osm_.buildings.size(),
+               osm_.features.size(), label_set.c_str(), ids.c_str());
   if (!c_.map) return;
 
   // mapping: config/<mapping>
@@ -131,7 +174,7 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.loc.site
   }
   if (!c.surface.empty()) {
     std::string path = c.surface;
-    if (path == "auto") path = data_dir() + "/surface/" + site_.map + "_epsg" + std::to_string(osm_.epsg) + ".npz";
+    if (path == "auto") path = site_.survey_path(osm_.epsg);
     if (!std::filesystem::exists(path)) throw std::runtime_error("no survey model at " + path);
     if (!prior_) throw std::runtime_error("the survey is labelled by OSM: the mapping config needs a confusion matrix");
     const YAML::Node v = y["survey"];
@@ -160,7 +203,7 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.loc.site
 Pipeline::~Pipeline() = default;
 
 bool Pipeline::step() {
-  if (t_ + 1 >= T_ || !run_->step()) return false;
+  if (t_ + 1 >= T_ || !(odo_.empty() ? run_->step() : run_->step(odo_[t_ + 1]))) return false;
   const long t = t_ = run_->t();
   const osmloc::Localizer& loc = run_->localizer();
   const bool agree = c_.lock_agree_m <= 0 ||

@@ -3,15 +3,16 @@
 Global LiDAR localization against OpenStreetMap (no prior map, GPS or initial pose), and an OSM-BKI
 semantic map built online at the poses it finds. ROS-free: C++ core, Python for maps and the live view.
 The localization is [osm_localization](https://github.com/donceykong/osm_localization), a submodule
-(`third_party/osm_localization`, pinned, used unmodified): its sites, keyframes and localizer; this
-repository adds the mapping.
+(`third_party/osm_localization`, pinned): its sites, keyframes and localizer; the odometry it is fed
+is [FORM](https://github.com/rpl-cmu/form)'s LiDAR odometry (`third_party/form`, a submodule, used
+unmodified), estimated from every scan; this repository adds the mapping.
 
 ## Setup
 
 Run everything from the repository root.
 
 ```bash
-git submodule update --init third_party/osm_localization   # needs access to donceykong/osm_localization
+git submodule update --init third_party/osm_localization third_party/form   # osm_localization: needs access to donceykong/osm_localization
 conda env create -f environment.yaml      # env "osmlocbki"; -n NAME for another name
 conda activate osmlocbki                  # (already have an env? activate it and run: pip install -e .)
 export DATASET_PATH=/path/to/disk         # the disk holding datasets/mcd/...
@@ -83,7 +84,8 @@ python demos/run.py --site tuhh --seq tuhh_day_03 --odometry drifting --scale-bi
 |---|---|
 | `--strength S` | OSM strength; 0 = no OSM (default 0.1, in `config/mapping.yaml`; ~2 for cross-domain models) |
 | `--pose lag\|filtered\|gt` | pose scans are mapped at: settled 60 m later (default), immediate, or ground truth |
-| `--odometry near_exact\|drifting` | pose-graph odometry preset; `--scale-bias`, `--yaw-rw` simulate drift |
+| `--odometry-source form\|gt` | odometry: FORM over every scan (default; cached in `data/odometry/`), or ground truth's |
+| `--odometry auto\|near_exact\|drifting` | pose-graph odometry noise (auto: drifting with FORM, near_exact with ground truth); `--scale-bias`, `--yaw-rw` simulate drift on ground truth's |
 | `--max-kf N`, `--map-spacing M` | stop after N keyframes; metres between mapped scans (default 5) |
 | `--eval DIR`, `--label-set SET` | score the map against `<seq>/DIR` labels (label set, default `mcd`) |
 | `--no-view`, `--save PNG`, `--draw-every N` | headless; save the final view; keyframes between redraws |
@@ -131,7 +133,8 @@ p.mesh()        # nvblox: vertices, triangles, colours (map frame)
 50 m into the map: every survey voxel once, labelled by OSM gated by its height over the survey's
 terrain (ground or not), at a tenth of a LiDAR point's weight so LiDAR wins where it sees the same
 place. This fills roofs, canopy and gaps the vehicle never sees. `auto` reads
-`data/surface/<map>_epsg<zone>.npz` (KTH and CU main campus exist; they are built from LAS/LAZ tiles
+`<the site's data_dir>/surface/<map>_epsg<zone>.npz` on the dataset's disk (KTH, CU main campus, CU
+north campus and Kittredge Loop (links to CU main campus's), KITTI-360 drive 0000 exist; built from LAS/LAZ tiles
 or DSM/DEM rasters by osm_localization: `python -m osmloc.dsm --site S`, then
 `osmloc build-surface --site S`). The height datum offset is estimated from each scan's ground points.
 
@@ -155,16 +158,18 @@ osm_localization, whose own tests cover its localizer).
 
 ## How it works
 
-Every 1 m, osm_localization matches the scan's building points against descriptors ray-cast from OSM
-buildings; its rigid tracker, history check and iSAM2 fixed-lag pose graph turn these matches plus
+FORM estimates the LiDAR's motion from every scan (a fixed-lag smoother; each scan's pose is the one it
+reported when the scan arrived), started from ground truth's attitude at the first scan, as an IMU's
+gravity would start it. Every 1 m, osm_localization matches the scan's building points against
+descriptors ray-cast from OSM buildings; its rigid tracker, history check and iSAM2 fixed-lag pose graph turn these matches plus
 odometry into poses (`rigid`, `graph`, `filtered`, and `lag`, settled 60 m later; `--loc-surface`
 adds its registration against the airborne survey). Every 5 m, once the localizer is locked (100 m
 travelled and `rigid` within `--lock-agree-m`, 2 m, of `graph`; 0 locks on the graph alone), a scan is
 placed and inserted into a Bayesian kernel inference voxel map: each point deposits the network's class
 distribution, boosted toward the classes nearby OSM features support, gated by Patchwork++ ground
 segmentation. The scans mapped are those the network exported class distributions for, which need not
-be keyframes: each is placed at the pose of the keyframe before it plus the ground-truth motion between
-them (under a metre, as odometry would give it).
+be keyframes: each is placed at the pose of the keyframe before it plus FORM's motion between them (under
+a metre); FORM's roll and pitch level the scans and its height places them.
 
 The nvblox backend keeps the same voxels in nvblox's GPU voxel blocks (the same evidence as the CPU
 map, up to float rounding) and integrates every mapped scan into an nvblox TSDF on the same grid. A
@@ -180,13 +185,16 @@ Unlike the originals: OSM lines and points are buffered by their width (no libos
 downsampling uses exact keys (OSM-BKI's hash merges mirror-image voxels); ROS, the OSM count prior,
 free-space samples, the airborne-LiDAR surface and the offline smoother are dropped.
 
-Limits: odometry, roll/pitch and height come from the dataset's ground truth (optionally with
-simulated drift); the first ~100 m are not mapped.
+Limits: ground truth still picks the keyframes (every 1 m of its path), FORM's start (attitude and
+position at the first scan) and scores; without an IMU, FORM's roll and pitch may drift on long runs;
+the first ~100 m are not mapped. `--odometry-source gt` restores ground truth's odometry, roll/pitch
+and height.
 
 ## Credits
 
 osm_localization's descriptor and matching port the MATLAB of Y. Cho et al., "OpenStreetMap-Based LiDAR Global
 Localization in Urban Environment Without a Prior LiDAR Map", RA-L 2022 (CC BY-NC-SA 4.0; derived
-code carries the same terms). BKI mapping after L. Gan et al., RA-L 2020. Patchwork++
+code carries the same terms). BKI mapping after L. Gan et al., RA-L 2020. FORM: E. Potokar, T. Pool, D. McGann, M. Kaess, 2025
+(`third_party/form`, MIT). Patchwork++
 (`third_party/patchworkpp`, BSD-2), Urban Robotics Lab, KAIST. Map data © OpenStreetMap contributors
 (ODbL).

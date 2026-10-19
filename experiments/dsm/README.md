@@ -6,10 +6,10 @@ the mapped poses at the map's resolution, and compares ways to give those voxels
 and a class (see its docstring).
 
 ```bash
-# the survey model: data/surface/<map>_epsg<zone>.npz (dsm, dem, airborne + roof-edge wall points),
+# the survey model: $DATASET_PATH/<site data_dir>/surface/<map>_epsg<zone>.npz (dsm, dem, airborne + roof-edge wall points),
 # built by osm_localization from LAS/LAZ tiles
 PYTHONPATH=python python experiments/dsm/project_dsm.py --site kth --seq kth_day_09 --model lidarrv_mcd \
-    --surface data/surface/mcd_kth_epsg32634.npz         # --reuse: skip the run, use the last one
+    --surface $DATASET_PATH/datasets/mcd/kth/surface/mcd_kth_epsg32634.npz         # --reuse: skip the run, use the last one
 ```
 
 Writes `out/<site>_<seq>_survey.png` (six top-down panels) and `out/<site>_<seq>_survey_voxels.npz`.
@@ -47,7 +47,7 @@ edges of building-like cells, cropped to the site's `map_bbox` + 100 m.
 G=$DATASET_PATH/datasets/kitti360/geospatial/kitti360_DGM025-2026
 python experiments/dsm/raster_survey.py --site kitti360 \
     --dsm $G/kitti360_DOM1/merged_dsm.tif --dem $G/kitti360_DGM025/merged_dem.tif
-# -> data/surface/k360_0000_epsg32632.npz (1.2 x 1.3 km, 25.7M points, 366 MB; 5 s)
+# -> $DATASET_PATH/datasets/kitti360/surface/k360_0000_epsg32632.npz (1.2 x 1.3 km, 25.7M points, 366 MB; 5 s)
 ```
 
 KITTI-360 drive 0000 (2026-10-18): the rasters (ETRS89 / UTM 32N, DHHN2016 heights) need no
@@ -59,4 +59,4 @@ DEM (1.73 m nominal); in the loop the datum settles at -0.14..-0.22 m. Over the 
 ## Next
 
 - Drop the vehicle class from OSM support at non-ground survey voxels over parking (canopy).
-- CU main campus has a survey too (`data/surface/cu_main_epsg32613.npz`) but no mapped label set yet.
+- CU main campus has a survey too (`datasets/CU_MULTI/main_campus/surface/cu_main_epsg32613.npz`) but no mapped label set yet.

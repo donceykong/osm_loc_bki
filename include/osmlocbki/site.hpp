@@ -17,6 +17,9 @@
 #include <string>
 #include <vector>
 
+#include <Eigen/Geometry>
+#include <map>
+
 #include "osmlocbki/common.hpp"
 
 namespace YAML {
@@ -46,6 +49,8 @@ class Site {
   std::string name, map;
   const osmloc::Site& loc() const { return *loc_; }
   std::string map_prefix() const;  // data/maps/<map>
+  // the site's airborne survey model: <its data_dir>/surface/<map>_epsg<zone>.npz (on the dataset's disk)
+  std::string survey_path(int epsg) const;
 
   // the label set (config/labels.yaml) the scans' labels are in: the model's for inferred labels,
   // else the site's own (config/sites.yaml label_set)
@@ -67,11 +72,13 @@ class Site {
 // The scans a run maps or integrates: the localization keyframes, and the scans the model exported
 // class distributions for (which need not be keyframes), in recording order. Each hangs off the
 // keyframe at or before it (its anchor) and is placed at that keyframe's estimated pose plus the
-// ground-truth motion between the two (under a keyframe spacing), as odometry would carry it.
+// motion between the two (under a keyframe spacing) by odometry: `odometry`'s LiDAR poses (gravity
+// aligned, world), else ground truth's. Their roll and pitch level the scans and their height places
+// them; ground truth is kept for scoring. Scans the odometry has no pose for are left out.
 class Frames {
  public:
   Frames(const Site& site, const std::string& seq, const std::vector<long>& keyframe_ids, const std::set<long>& extra_ids,
-         int epsg);
+         int epsg, const std::map<long, Eigen::Isometry3d>* odometry = nullptr);
   size_t size() const { return scan_id.size(); }
   // frame f's pose from its anchor keyframe's (UTM, heading deg)
   void pose(long f, const Vec2& anchor_xy, double anchor_psi, Vec2& xy, double& psi) const;
