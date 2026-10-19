@@ -97,14 +97,26 @@ else()
   message(STATUS "osmlocbki: nvblox backend OFF")
 endif()
 
+# osm_localization (third_party/osm_localization, a submodule): the global localization against
+# OSM the map is built from; its library alone
+set(OSMLOC_PYTHON OFF)
+set(OSMLOC_TESTS OFF)
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/osm_localization/CMakeLists.txt")
+  message(FATAL_ERROR "third_party/osm_localization is missing: git submodule update --init")
+endif()
+set(_skbuild "${SKBUILD}")
+set(SKBUILD OFF)  # its pip install rules are for its own Python module, not built here
+add_subdirectory(third_party/osm_localization EXCLUDE_FROM_ALL)
+set(SKBUILD "${_skbuild}")
+target_compile_options(osmloc PRIVATE -w)
+
 add_library(osmlocbki STATIC
   src/npz.cpp src/geo.cpp src/site.cpp src/labels.cpp
-  src/frontend.cpp src/chain.cpp src/backend.cpp
   src/osm_prior.cpp src/ground.cpp src/voxel_store_cpu.cpp src/semantic_map.cpp src/survey.cpp
   src/pipeline.cpp)
 target_include_directories(osmlocbki PUBLIC include)
 target_link_libraries(osmlocbki PUBLIC Eigen3::Eigen OpenMP::OpenMP_CXX yaml-cpp::yaml-cpp
-                      nlohmann_json::nlohmann_json ZLIB::ZLIB osmlocbki_nvblox PRIVATE patchworkpp)
+                      nlohmann_json::nlohmann_json ZLIB::ZLIB osmloc osmlocbki_nvblox PRIVATE patchworkpp)
 # where config/ and data/ are found unless $OSMLOCBKI_ROOT says otherwise
 target_compile_definitions(osmlocbki PRIVATE OSMLOCBKI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 # Every file (Patchwork++ included: it trades Eigen objects with us) allocates and frees Eigen heap
@@ -112,8 +124,8 @@ target_compile_definitions(osmlocbki PRIVATE OSMLOCBKI_SOURCE_DIR="${CMAKE_CURRE
 target_compile_definitions(osmlocbki PUBLIC EIGEN_MAX_ALIGN_BYTES=16 EIGEN_MALLOC_ALREADY_ALIGNED=1)
 target_compile_definitions(patchworkpp PUBLIC EIGEN_MAX_ALIGN_BYTES=16 EIGEN_MALLOC_ALREADY_ALIGNED=1)
 if(OSMLOCBKI_AVX2)
-  # the numeric kernels; chain.cpp stays without FMA, rounding like the GTSAM it reproduces
-  set_source_files_properties(src/frontend.cpp src/backend.cpp src/voxel_store_cpu.cpp src/semantic_map.cpp src/osm_prior.cpp
+  # the numeric kernels
+  set_source_files_properties(src/voxel_store_cpu.cpp src/semantic_map.cpp src/osm_prior.cpp
     PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
 endif()
 
@@ -130,7 +142,7 @@ endif()
 
 if(OSMLOCBKI_TESTS)
   enable_testing()
-  add_executable(osmlocbki_tests tests/main.cpp tests/test_localization.cpp tests/test_mapping.cpp tests/test_end_to_end.cpp)
+  add_executable(osmlocbki_tests tests/main.cpp tests/test_io.cpp tests/test_mapping.cpp tests/test_end_to_end.cpp)
   target_link_libraries(osmlocbki_tests PRIVATE osmlocbki)
   target_compile_definitions(osmlocbki_tests PRIVATE OSMLOCBKI_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
   add_test(NAME osmlocbki_tests COMMAND osmlocbki_tests)

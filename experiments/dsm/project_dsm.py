@@ -123,7 +123,7 @@ def main():
         p.finish()
         print(p.status())
         vox = p.voxels()
-        poses = p.gt[p.mapped] if a.pose == "gt" else p.trajectory(a.pose)[p.mapped]  # where scans were mapped
+        poses = p.mapped_xy  # where scans were mapped
         np.savez(run_cache, xyz=vox["xyz"], cls=vox["cls"], poses=poses)
     tax = p.taxonomy()
     names, colors = tax["names"], tax["colors"] / 255.0

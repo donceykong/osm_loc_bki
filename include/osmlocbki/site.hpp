@@ -1,10 +1,13 @@
-// Datasets: a site from config/sites.yaml (where its sequences live, how its world frame maps
-// onto OSM, pose / scan / label formats) and a sequence's keyframes.
+// Datasets. A site is one of osm_localization's (third_party/osm_localization/config/sites.yaml:
+// where its sequences live, its georeference, pose / scan / label formats, its OSM map), plus what
+// mapping adds to it (config/sites.yaml: the label set of the site's own labels, the LiDAR's mounting
+// when osm_localization does not need it, the LiDAR's range image).
 //
 // Paths: the repository is $OSMLOCBKI_ROOT (default: where it was built from); generated files go
-// to $OSMLOCBKI_DATA (default <root>/data); dataset folders resolve against $DATASET_PATH.
-// Ground truth is used for choosing keyframes, simulating odometry, levelling scans (roll and
-// pitch, as an IMU would) and scoring only.
+// to $OSMLOCBKI_DATA (default <root>/data), osm_localization's to <data>/localization; dataset
+// folders resolve against $DATASET_PATH. Ground truth is used for levelling scans (roll and pitch,
+// as an IMU would), placing scans between keyframes (their motion from the keyframe, as odometry
+// would give it) and scoring only.
 #pragma once
 
 #include <array>
@@ -19,18 +22,15 @@
 namespace YAML {
 class Node;
 }
+namespace osmloc {
+class Site;
+}
 
 namespace olb {
 
 std::string repo_root();
 std::string data_dir();
 std::string config_dir();
-
-struct Poses {
-  std::vector<long> ids;
-  MatX3 p;                        // world positions
-  std::vector<Eigen::Quaterniond> q;
-};
 
 // the LiDAR's range image, for the TSDF (config/mapping.yaml nvblox: is MCD's Ouster)
 struct LidarModel {
@@ -40,76 +40,54 @@ struct LidarModel {
 
 class Site {
  public:
-  static std::vector<std::string> names();
+  static std::vector<std::string> names();  // osm_localization's sites
   static Site load(const std::string& name);
 
   std::string name, map;
-  std::optional<std::array<double, 4>> map_bbox;  // lat_lo, lon_lo, lat_hi, lon_hi
-
-  std::string root() const;
-  std::string seq_dir(const std::string& seq) const;
+  const osmloc::Site& loc() const { return *loc_; }
   std::string map_prefix() const;  // data/maps/<map>
-  // lidar -> body extrinsic when the poses are of the body
-  std::optional<Mat4> lidar_to_body() const;
-  // the site's own LiDAR, when it is not the one config/mapping.yaml describes
-  std::optional<LidarModel> lidar() const;
 
-  Poses read_poses(const std::string& seq) const;
-  // (lat, lon) of world positions
-  MatX2 latlon(const MatX2& world_xy) const;
-
-  std::string labels_tag(const std::string& model = "") const;
-  // the label set (config/labels.yaml) the scans' labels are in: the site's own for its labels,
-  // the model's for inferred ones
+  // the label set (config/labels.yaml) the scans' labels are in: the model's for inferred labels,
+  // else the site's own (config/sites.yaml label_set)
   std::string label_set(const std::string& model = "") const;
-  // scan ids with a label file, or nothing when every scan has one
-  std::optional<std::set<long>> labelled_scans(const std::string& seq, const std::string& model = "") const;
+  std::optional<LidarModel> lidar() const;
+  std::optional<Mat4> lidar_to_body() const;  // config/sites.yaml's, else osm_localization's
   // scan ids the model exported Dirichlet outputs for (multiclass_alpha), or nothing if it did not
-  std::optional<std::set<long>> alpha_scans(const std::string& seq, const std::string& model = "") const;
+  std::optional<std::set<long>> alpha_scans(const std::string& seq, const std::string& model) const;
+  std::vector<float> load_alpha(const std::string& seq, long id, const std::string& model) const;  // (N, K)
   std::vector<float> load_scan(const std::string& seq, long id) const;  // (N, 4) x y z intensity
   std::vector<int32_t> load_labels(const std::string& seq, long id, long n_points, const std::string& model = "") const;
-  std::vector<float> load_alpha(const std::string& seq, long id, const std::string& model) const;  // (N, K)
 
  private:
-  std::shared_ptr<YAML::Node> cfg_;
-  std::string inferred_dir(const std::string& seq, const std::string& model, const std::string& kind) const;
+  std::shared_ptr<const osmloc::Site> loc_;
+  std::shared_ptr<YAML::Node> cfg_;  // config/sites.yaml's entry (empty when there is none)
+  std::string alpha_dir(const std::string& seq, const std::string& model) const;
 };
 
-struct OdometryNoise {
-  double scale_bias = 0, yaw_rw = 0, trans_noise = 0, lat_noise = 0, yaw_noise = 0;
-  unsigned seed = 0;
-};
-
-struct OdometryStep {
-  std::optional<Vec2> d_body;  // none for the first keyframe
-  double d_psi = 0;            // deg
-};
-
-class Sequence {
+// The scans a run maps or integrates: the localization keyframes, and the scans the model exported
+// class distributions for (which need not be keyframes), in recording order. Each hangs off the
+// keyframe at or before it (its anchor) and is placed at that keyframe's estimated pose plus the
+// ground-truth motion between the two (under a keyframe spacing), as odometry would carry it.
+class Frames {
  public:
-  // keyframes at least `spacing` m apart along the ground-truth path, plus every scan in `include`
-  Sequence(const Site& site, const std::string& name, const std::string& model = "", double spacing = 1.0,
-           const std::set<long>& include = {});
-  size_t size() const { return scan_ids.size(); }
-  MatX2 gt_xy(int epsg) const;
-  // the LiDAR's ground-truth position (UTM) and the heading of its +x axis (deg, UTM grid)
-  void gt_lidar(int epsg, MatX2& xy, std::vector<double>& psi) const;
-  // per keyframe: ground-truth relative motion, with optional simulated drift
-  std::vector<OdometryStep> odometry(const OdometryNoise& n = {}) const;
-  // (T, num_bin) scan descriptors of the keyframes from their points with these labels, cached under data/
-  MatXd descriptors(const std::vector<int>& building_ids, bool cache = true) const;
+  Frames(const Site& site, const std::string& seq, const std::vector<long>& keyframe_ids, const std::set<long>& extra_ids,
+         int epsg);
+  size_t size() const { return scan_id.size(); }
+  // frame f's pose from its anchor keyframe's (UTM, heading deg)
+  void pose(long f, const Vec2& anchor_xy, double anchor_psi, Vec2& xy, double& psi) const;
 
-  Site site;
-  std::string name, model, labels;
-  double spacing;
-  std::vector<long> scan_ids;
-  MatX2 world_xy, latlon;
-  std::vector<double> world_psi;  // deg
-  // the LiDAR per keyframe: its rotation with the heading removed (x along its own heading,
-  // gravity down), its world position and heading (deg)
+  std::vector<long> scan_id;
+  std::vector<int> anchor;    // its keyframe
+  std::vector<int> keyframe;  // the keyframe it is, or -1
+  std::vector<std::vector<long>> of_keyframe;  // the frames anchored at each keyframe, in order
+  // the LiDAR per frame: its rotation with the heading removed (x along its own heading, gravity
+  // down), its height (world), its motion from the anchor in the anchor's frame (x, y, heading deg),
+  // and its ground truth (UTM, heading deg on the UTM grid)
   std::vector<Eigen::Matrix3d> level;
-  MatX3 lidar_world;
-  std::vector<double> lidar_psi;
+  std::vector<double> z;
+  std::vector<Vec3> from_anchor;
+  MatX2 gt_xy;
+  std::vector<double> gt_psi;
 };
 
 }  // namespace olb

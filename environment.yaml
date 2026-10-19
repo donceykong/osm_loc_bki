@@ -12,6 +12,11 @@ dependencies:
   - yaml-cpp
   - nlohmann_json
   - zlib
+  # osm_localization (third_party/osm_localization): GTSAM, and OpenCV without a GUI toolkit
+  - gtsam=4.2
+  - libopencv=4.13=headless*
+  - libboost-headers
+  - tbb-devel
   - pybind11
   - scikit-build-core
   # Python: OSM parsing, the live view

@@ -1,6 +1,6 @@
 // End to end on real sequences; needs $DATASET_PATH (and is skipped without the data).
-//   MCD TUHH day_03, ground-truth labels, exact odometry: osmloc's README results row, then the
-//   map built at the lag poses agrees with the map built at ground truth
+//   MCD TUHH day_03, ground-truth labels, exact odometry: osm_localization localizes it through the
+//   pipeline, and the map built at the lag poses agrees with the map built at ground truth
 #include <cstdlib>
 #include <filesystem>
 
@@ -29,31 +29,31 @@ TEST(tuhh_day_03_localizes) {
     return;
   }
   PipelineConfig c;
-  c.site = "tuhh", c.seq = "tuhh_day_03", c.map = false;
+  c.loc.site = "tuhh", c.loc.seq = "tuhh_day_03", c.map = false;
   Pipeline p(c);
   while (p.step()) {
   }
   p.finish();
-  const Localizer& loc = p.localizer();
+  const osmloc::Localizer& loc = p.localizer();
   CHECK(p.size() == 1043);
-  auto within5 = [&](Output o) {
+  auto within5 = [&](const char* o) {
     MatX2 xy = loc.trajectory(o);
     long in = 0;
     for (long t = 0; t < p.size(); ++t) in += (xy.row(t) - p.gt().row(t)).norm() < 5;
     return double(in) / p.size();
   };
-  auto med = [&](Output o) {
+  auto med = [&](const char* o) {
     MatX2 xy = loc.trajectory(o);
     std::vector<double> e;
     for (long t = 0; t < p.size(); ++t) e.push_back((xy.row(t) - p.gt().row(t)).norm());
     return median(e);
   };
-  std::printf("  within 5 m: rigid %.3f, hybrid %.3f, lag %.3f; median hybrid %.2f m\n", within5(RIGID), within5(HYBRID),
-              within5(LAG), med(HYBRID));
-  CHECK(within5(RIGID) >= 0.93);
-  CHECK(within5(HYBRID) >= 0.93);
-  CHECK(within5(LAG) >= 0.99);
-  CHECK(med(HYBRID) < 0.7);
+  std::printf("  within 5 m: rigid %.3f, hybrid %.3f, lag %.3f; median hybrid %.2f m\n", within5("rigid"), within5("hybrid"),
+              within5("lag"), med("hybrid"));
+  CHECK(within5("rigid") >= 0.93);
+  CHECK(within5("hybrid") >= 0.93);
+  CHECK(within5("lag") >= 0.99);
+  CHECK(med("hybrid") < 0.7);
 }
 
 TEST(tuhh_day_03_maps_at_the_found_poses) {
@@ -64,7 +64,7 @@ TEST(tuhh_day_03_maps_at_the_found_poses) {
   // the first 400 m: mapped at the lag poses, and (the oracle) at ground truth
   auto run = [](const std::string& pose) {
     PipelineConfig c;
-    c.site = "tuhh", c.seq = "tuhh_day_03", c.pose = pose, c.max_kf = 400, c.map_spacing = 10.0;
+    c.loc.site = "tuhh", c.loc.seq = "tuhh_day_03", c.loc.max_kf = 400, c.pose = pose, c.map_spacing = 10.0;
     auto p = std::make_unique<Pipeline>(c);
     while (p->step()) {
     }
@@ -73,14 +73,14 @@ TEST(tuhh_day_03_maps_at_the_found_poses) {
   };
   auto lag = run("lag"), gt = run("gt");
   CHECK(lag->mapped().size() >= gt->mapped().size() / 2);
-  // each map, queried with the mapped keyframes' scans at ground truth: how often do they agree
+  // each map, queried with the mapped scans at ground truth: how often do they agree
   long same = 0, n = 0;
-  for (long t : lag->mapped()) {
-    auto a = lag->classify_keyframe(t), b = gt->classify_keyframe(t);
+  for (long f : lag->mapped()) {
+    auto a = lag->classify_frame(f), b = gt->classify_frame(f);
     for (size_t i = 0; i < a.size(); ++i)
       if (b[i] > 0) n += 1, same += a[i] == b[i];
   }
-  std::printf("  %zu of %zu keyframes mapped at lag poses; %.1f%% of the oracle map's labels reproduced\n",
+  std::printf("  %zu of %zu scans mapped at lag poses; %.1f%% of the oracle map's labels reproduced\n",
               lag->mapped().size(), gt->mapped().size(), 100.0 * same / std::max(1L, n));
   CHECK(n > 0);
   CHECK(same > 0.8 * n);

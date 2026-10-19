@@ -47,7 +47,7 @@ edges of building-like cells, cropped to the site's `map_bbox` + 100 m.
 G=$DATASET_PATH/datasets/kitti360/geospatial/kitti360_DGM025-2026
 python experiments/dsm/raster_survey.py --site kitti360 \
     --dsm $G/kitti360_DOM1/merged_dsm.tif --dem $G/kitti360_DGM025/merged_dem.tif
-# -> data/surface/kitti360_0000_epsg32632.npz (1.2 x 1.3 km, 25.7M points, 366 MB; 5 s)
+# -> data/surface/k360_0000_epsg32632.npz (1.2 x 1.3 km, 25.7M points, 366 MB; 5 s)
 ```
 
 KITTI-360 drive 0000 (2026-10-18): the rasters (ETRS89 / UTM 32N, DHHN2016 heights) need no

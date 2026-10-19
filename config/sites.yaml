@@ -1,114 +1,40 @@
-# Site registry: where each site's sequences live and how its world frame maps onto OSM.
+# What mapping adds to osm_localization's sites (third_party/osm_localization/config/sites.yaml:
+# where each site's sequences live, its georeference, pose / scan / label formats and OSM map).
+# Any site there runs; an entry here is needed only for what it does not say:
 #
-#   data_dir     sequence folders, relative to $DATASET_PATH (an absolute path is used as-is)
-#   map          map name: data/maps/<map>.osm and its GeoJSON (python -m osmlocbki.osm fetch|convert --site)
-#   map_bbox     [[lat_lo, lon_lo], [lat_hi, lon_hi]]: localization candidates are clipped to it
-#   georef       how world xy becomes lat/lon, one of
-#                  {mercator: {origin: [lat, lon], rel_pos: [x, y]}}  scaled Web-Mercator
-#                  {utm_fit: <json under config/georef/>}             rigid world -> UTM fit
-#   poses        pose file in the sequence folder ({seq} = sequence name) and its format:
-#                  csv      header with an id column (`id_col`), x, y, z, qx, qy, qz, w|qw
-#                  utm_csv  header-less timestamp, x, y, z, qx, qy, qz, qw; row i = scan i
-#                  kitti    KITTI-360: scan id, then the 4x4 pose row-major, space separated
-#   scans        scan folder in the sequence folder (float32 x, y, z, intensity)
-#   labels       per-point labels, one of
-#                  {flat: <dir in the sequence folder>, label_set: <config/labels.yaml label set>}
-#                     <dir>/<scan>.bin, int32 (MCD ground truth: an ORACLE input)
-#                  {model: int|alpha, root: <dir under data/>}    <seq>/inferred_labels/<model>/
-#                     predicted_labels (int32) or multiclass_alpha (float32 per class); the model's
-#                     label set is in config/labels.yaml (models:). When the model also exported
-#                     multiclass_alpha, those scans are mapped with its class distributions.
-#   lidar_to_body  {file, key}: lidar -> body extrinsic in a calibration yaml under data_dir, when
-#                the poses are of the body
-#   lidar        {azimuth, elevation, elevation_deg: [lo, hi]}: the LiDAR's range image for the TSDF,
-#                when it is not the Ouster OS1-128 config/mapping.yaml (nvblox:) describes
-#
-# The localizer's building points are the labels the label set maps to the common class "building"
-# (config/labels.yaml), so they follow whichever model's labels a run uses.
+#   label_set      the label set (config/labels.yaml) of the site's own labels (flat or scores); sites
+#                  run with a segmentation model take the model's (config/labels.yaml models:)
+#   lidar_to_body  {file, key}: lidar -> body extrinsic in a calibration yaml under the site's data_dir,
+#                  when the poses are of the body and osm_localization does not list it (mapping levels
+#                  the LiDAR's own scans: MCD's Ouster is mounted upside down)
+#   lidar          {azimuth, elevation, elevation_deg: [lo, hi]}: the LiDAR's range image for the TSDF,
+#                  when it is not the Ouster OS1-128 config/mapping.yaml (nvblox:) describes
 
-# KTH with a segmentation network's labels (pass the model, e.g. lidarrv_mcd or lidarrv_kitti360).
 kth:
-  data_dir: datasets/mcd/kth
-  map: mcd_kth
-  map_bbox: [[59.34512, 18.05320], [59.35787, 18.09341]]
-  georef: {mercator: {origin: [59.348268650, 18.073204280], rel_pos: [64.3932532565158, 66.4832330946657]}}
-  poses: {file: pose_inW.csv, format: csv, id_col: num}
-  scans: lidar_bin/data
-  labels: {model: int}
-  lidar_to_body: {file: hhs_calib.yaml, key: body.os_sensor.T}   # the poses are of the IMU body
+  lidar_to_body: {file: hhs_calib.yaml, key: body.os_sensor.T}
 
-# KTH with the dataset's own ground-truth labels (ORACLE input).
 kth_gt:
-  data_dir: datasets/mcd/kth
-  map: mcd_kth
-  map_bbox: [[59.34512, 18.05320], [59.35787, 18.09341]]
-  georef: {mercator: {origin: [59.348268650, 18.073204280], rel_pos: [64.3932532565158, 66.4832330946657]}}
-  poses: {file: pose_inW.csv, format: csv, id_col: num}
-  scans: lidar_bin/data
-  labels: {flat: gt_labels, label_set: mcd}
+  label_set: mcd
   lidar_to_body: {file: hhs_calib.yaml, key: body.os_sensor.T}
 
 tuhh:
-  data_dir: datasets/mcd/tuhh
-  map: mcd_tuhh
-  map_bbox: [[53.452961, 9.954326], [53.470927, 9.984503]]
-  georef: {utm_fit: tuhh_world_to_utm.json}
-  poses: {file: pose_inW.csv, format: csv, id_col: num}
-  scans: lidar_bin/data
-  labels: {flat: gt_labels, label_set: mcd}
+  label_set: mcd
   lidar_to_body: {file: hhs_calib.yaml, key: body.os_sensor.T}
 
 ntu:
-  data_dir: datasets/mcd/ntu
-  map: ntu_campus
-  map_bbox: [[1.3350, 103.6700], [1.3620, 103.6970]]
-  georef: {utm_fit: ntu_world_to_utm.json}
-  poses: {file: pose_inW.csv, format: csv, id_col: num}
-  scans: lidar_bin/data
-  labels: {model: int, root: ntu_labels}
   lidar_to_body: {file: atv_calib.yaml, key: body.os_sensor.T}
 
-# NTU with the dataset's own ground-truth labels (ORACLE input).
 ntu_gt:
-  data_dir: datasets/mcd/ntu
-  map: ntu_campus
-  map_bbox: [[1.3350, 103.6700], [1.3620, 103.6970]]
-  georef: {utm_fit: ntu_world_to_utm.json}
-  poses: {file: pose_inW.csv, format: csv, id_col: num}
-  scans: lidar_bin/data
-  labels: {flat: gt_labels, label_set: mcd}
+  label_set: mcd
   lidar_to_body: {file: atv_calib.yaml, key: body.os_sensor.T}
 
-# CU-Multi labels: only their building class is in config/labels.yaml so far.
+# CU-Multi: its own labels (only their building class is in config/labels.yaml so far)
 cu_main_campus:
-  data_dir: datasets/CU_MULTI/main_campus
-  map: cu_main
-  map_bbox: [[40.0003, -105.2788], [40.0148, -105.2583]]
-  georef: {utm_fit: cu_main_campus_utm.json}
-  poses: {file: "{seq}_main_campus_REGISTERED_poses.csv", format: utm_csv}
-  scans: lidar_bin/data
-  labels: {flat: "{seq}_main_campus_lidar_labels", label_set: cu_multi}
+  label_set: cu_multi
 
-# CU-Multi north campus with CENet's labels (MCD classes; flat in the model's folder): sequence robot1.
-# It lies within the main campus map and survey, so it shares their map, database and DSM.
-cu_north_campus:
-  data_dir: datasets/CU_MULTI/north_campus
-  map: cu_main
-  map_bbox: [[40.0003, -105.2788], [40.0148, -105.2583]]
-  georef: {utm_fit: cu_north_campus_utm.json}
-  poses: {file: poses/poses_interpolated.csv, format: csv, id_col: "scan #"}
-  scans: lidar_bin/data
-  labels: {flat: inferred_labels/cenet_mcd, label_set: mcd}
-
-# KITTI-360 (sequences 2013_05_28_drive_<NNNN>_sync; the map is drive 0000's OSM extract), with a
-# segmentation network's labels (pass the model, e.g. lidarrv_kitti360 or lidarrv_mcd). The world
-# frame is KITTI-360's scaled Web-Mercator, exactly; the poses are of the Velodyne.
 kitti360:
-  data_dir: datasets/kitti360
-  map: kitti360_0000
-  map_bbox: [[49.0111, 8.4366], [49.0213, 8.4501]]
-  georef: {mercator: {origin: [48.9843445, 8.4295857], rel_pos: [0.0, 0.0]}}
-  poses: {file: velodyne_poses.txt, format: kitti}
-  scans: velodyne_points/data
-  labels: {model: int}
   lidar: {azimuth: 1024, elevation: 64, elevation_deg: [-24.9, 2.0]}   # Velodyne HDL-64E
+
+kitti360_gt:
+  label_set: kitti360
+  lidar: {azimuth: 1024, elevation: 64, elevation_deg: [-24.9, 2.0]}

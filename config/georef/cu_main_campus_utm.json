@@ -1,7 +1,0 @@
-{
-  "epsg": 32613,
-  "yaw_deg": 0.0,
-  "tx": 0.0,
-  "ty": 0.0,
-  "note": "Identity: CU-Multi <robot>_main_campus_REGISTERED_poses.csv are already UTM 13N (EPSG:32613), so world_xy == UTM."
-}

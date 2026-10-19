@@ -1,14 +1,17 @@
 // End to end, online: global localization against OSM building outlines (no prior map, no GPS,
-// no initial pose), and the OSM-BKI semantic map built from the scans at the poses it finds.
+// no initial pose) by osm_localization (third_party/osm_localization), and the OSM-BKI semantic map
+// built from the scans at the poses it finds.
 //
-// Per keyframe (every `spacing` m) the localizer sees the scan's building descriptor and the
-// odometry since the previous keyframe. Mapping keyframes (every `map_spacing` m, among the scans
-// the segmentation model exported class distributions for) are inserted into the map once their
-// pose is ready, while the localizer is locked:
-//   pose = lag       the fixed-lag pose, settled lag_m of travel later (the default: accurate)
+// Per keyframe (every `loc.spacing` m) osm_localization's run localizes the scan from its building
+// descriptor and the odometry since the previous keyframe. The scans to map (every `map_spacing` m,
+// among the scans the segmentation model exported class distributions for) are placed off the
+// keyframe at or before them (Frames) once that keyframe's pose is ready, while the localizer is
+// locked:
+//   pose = lag       the fixed-lag pose, settled loc.lag_m of travel later (the default: accurate)
 //          filtered  the filtered pose, at once (online, a little noisier)
 //          gt        ground truth (an oracle, to compare against)
-// Locked: at least lock_m of path behind, and the rigid and graph outputs agree.
+// Locked: at least lock_m of path behind, and (lock_agree_m > 0) the rigid and graph outputs within
+// lock_agree_m of each other.
 //
 // With an airborne survey (`surface`), each mapped keyframe also projects the survey within
 // survey.radius of its pose into the map, every voxel once: a voxel gets survey.weight times OSM's
@@ -23,7 +26,7 @@
 #include <string>
 #include <vector>
 
-#include "osmlocbki/backend.hpp"
+#include "osmloc/run.hpp"
 #include "osmlocbki/ground.hpp"
 #include "osmlocbki/semantic_map.hpp"
 #include "osmlocbki/site.hpp"
@@ -32,31 +35,24 @@
 namespace olb {
 
 struct PipelineConfig {
-  std::string site, seq, model;   // model: the segmentation model, for sites with inferred labels
-  std::vector<int> building_ids;  // default: the label set's (Taxonomy::building_ids)
-  double spacing = 1.0;           // localization keyframes, m
-  long max_kf = 0;                // 0 = all
-  // localization
-  double db_spacing = 2.0;
-  int k = 20, top_n = 1000;
-  double agree_m = 2.0, lag_m = 60.0;
-  GraphParams graph;              // GraphParams() or GraphParams::drifting()
-  FilterParams filter;
-  OdometryNoise odometry;
+  // localization: osm_localization's run (site, seq, model, keyframe spacing, max_kf, odometry,
+  // graph, lag, surface registration, ...); its building ids default to the label set's
+  // (Taxonomy::building_ids), and it never opens its own view
+  osmloc::RunConfig loc;
   // mapping
   bool map = true;
   std::string pose = "lag";       // lag | filtered | gt
   double map_spacing = 5.0;       // m between mapped keyframes
-  double lock_m = 100.0;
+  double lock_m = 100.0, lock_agree_m = 2.0;
   std::string mapping = "mapping.yaml";  // under config/
   double strength = -1;           // OSM strength; < 0: the mapping config's
   std::string surface;            // airborne survey .npz ("auto": data/surface/<map>_epsg<zone>.npz); empty: none
   std::string mapper;             // map backend, cpu | nvblox; empty: the mapping config's
 };
 
-// a mapped keyframe: its scan in the map frame and the classes its points came in with
+// a mapped scan (frame f): its scan in the map frame and the classes its points came in with
 struct MappedScan {
-  long t = -1, scan_id = -1;
+  long f = -1, scan_id = -1;
   Vec2 xy;    // UTM
   double psi; // deg
   MatX3f points;
@@ -69,26 +65,29 @@ class Pipeline {
   ~Pipeline();
   // localize the next keyframe and map what is ready -> false when the sequence is done
   bool step();
-  // settle the fixed lag and map the keyframes it settles
+  // settle the fixed lag (and osm_localization's registration in flight) and map what it settles
   void finish();
 
   long t() const { return t_; }       // last keyframe localized
   long size() const { return T_; }
   bool locked() const { return locked_; }
   const PipelineConfig& config() const { return c_; }
-  const Sequence& sequence() const { return *seq_; }
-  const Localizer& localizer() const { return *loc_; }
+  const Frames& frames() const { return *frames_; }
+  const osmloc::Run& run() const { return *run_; }
+  const osmloc::Localizer& localizer() const { return run_->localizer(); }
+  const std::vector<long>& keyframe_ids() const { return kf_ids_; }
   const OsmMap& osm() const { return osm_; }
   const Taxonomy& taxonomy() const { return tax_; }
   const SemanticMap* semantic_map() const { return map_.get(); }
   const OsmPrior* osm_prior() const { return prior_.get(); }  // null without a confusion matrix
-  const MatX2& gt() const { return gt_; }  // the LiDAR's ground truth, UTM
+  const MatX2& gt() const { return gt_; }  // the keyframes' LiDAR ground truth, UTM
   const std::vector<double>& gt_psi() const { return gt_psi_; }
-  const std::vector<long>& map_keyframes() const { return map_kf_; }  // the keyframes to map
-  const std::vector<long>& mapped() const { return mapped_; }         // and those mapped so far
+  const std::vector<long>& map_frames() const { return map_f_; }  // the frames to map
+  const std::vector<long>& mapped() const { return mapped_; }     // and those mapped so far
+  const std::vector<Vec2>& mapped_xy() const { return mapped_xy_; }  // where each was mapped (UTM)
   const MappedScan& last_mapped() const { return last_; }
-  // keyframe t's scan at its ground-truth pose, classified by the map (0 for dropped points)
-  std::vector<int> classify_keyframe(long t) const;
+  // frame f's scan at its ground-truth pose, classified by the map (0 for dropped points)
+  std::vector<int> classify_frame(long f) const;
   std::string status() const;
   double map_seconds() const { return map_s_; }
   long survey_voxels() const { return static_cast<long>(survey_done_.size()); }  // projected so far
@@ -102,26 +101,25 @@ class Pipeline {
     std::vector<long> index;  // into the raw scan
     long raw = 0;             // points in the raw scan
   };
-  Scan load(long t, bool semantics = true) const;
-  MatX3f place(const MatX3f& levelled, const Vec2& xy, double psi, long t) const;
-  void insert(long t, const Vec2& xy, double psi);
-  // a settled keyframe: mapped if it is a mapping keyframe, else its geometry alone when the map has
-  // geometry and takes every keyframe's (nvblox every_keyframe)
-  void place_keyframe(long t, const Vec2& xy, double psi);
-  void map_ready(const Estimate& e);
+  Scan load(long f, bool semantics = true) const;
+  MatX3f place(const MatX3f& levelled, const Vec2& xy, double psi, long f) const;
+  void insert(long f, const Vec2& xy, double psi);
+  // keyframe u's pose is ready: the frames anchored at it are placed off it, each mapped if it is a
+  // frame to map, else (a keyframe) its geometry alone when the map has geometry and takes every
+  // keyframe's (nvblox every_keyframe)
+  void place_from(long u, const Vec2& xy, double psi);
+  void settle_lag();
   void project_survey(const Vec2& xy, const MatX3f& pts, const std::vector<int8_t>& ground);
   std::string survey_status() const;
 
   PipelineConfig c_;
   Site site_;
-  std::unique_ptr<Sequence> seq_;
-  std::shared_ptr<Database> db_;
-  std::unique_ptr<Localizer> loc_;
-  MatXd q_;
-  std::vector<OdometryStep> odo_;
+  std::unique_ptr<osmloc::Run> run_;
+  std::vector<long> kf_ids_;
+  std::unique_ptr<Frames> frames_;
   MatX2 gt_;
   std::vector<double> gt_psi_;
-  long T_ = 0, t_ = -1;
+  long T_ = 0, t_ = -1, settled_ = -1;  // settled_: the newest keyframe whose lag pose is settled
   bool locked_ = false;
   // mapping
   OsmMap osm_;
@@ -131,8 +129,9 @@ class Pipeline {
   std::shared_ptr<const OsmPrior> prior_;
   std::unique_ptr<SemanticMap> map_;
   std::unique_ptr<GroundSegmenter> ground_;
-  std::vector<char> is_map_kf_;
-  std::vector<long> map_kf_, mapped_;
+  std::vector<char> is_map_f_;
+  std::vector<long> map_f_, mapped_;
+  std::vector<Vec2> mapped_xy_;
   MappedScan last_;
   double map_s_ = 0, geo_s_ = 0;  // mapping, and geometry-only keyframes
   // the airborne survey

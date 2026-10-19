@@ -15,8 +15,10 @@ or with explicit paths: `fetch --bbox LAT_LO LON_LO LAT_HI LON_HI -o x.osm`, `co
                                with holes, lines (roads, sidewalks, cycleways, fences) and single
                                trees as points. Lines and points stand for bands of their width.
 
-After converting a new map, (re)build its localization database: it is built on first use and cached
-as data/db_<map>_free2_n360_r50.npz (delete it to rebuild).
+`convert` also writes osm_localization's own map GeoJSON (<map>_{buildings,roads}.geojson, by its
+converter, third_party/osm_localization/python/osmloc/osm.py) to data/localization/maps/, which the
+localization reads. Its database is built on first use and cached as
+data/localization/db_<map>_free2_n360_r50.npz (delete it after changing a map).
 """
 
 import argparse
@@ -230,6 +232,17 @@ def to_geojson(osm_path, out_prefix):
     return counts
 
 
+def _osm_localization():
+    """osm_localization's converter module, loaded from its file (its package needs its own C++ module)."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "third_party", "osm_localization",
+                        "python", "osmloc", "osm.py")
+    spec = importlib.util.spec_from_file_location("osm_localization_osm", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def main():
     ap = argparse.ArgumentParser(prog="python -m osmlocbki.osm", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -263,6 +276,12 @@ def main():
             ap.error("convert needs --site, or an .osm file and --out-prefix")
         counts = to_geojson(src, out)
         print(", ".join(f"{n} {k}" for k, n in counts.items()) + f" -> {out}_{{buildings,semantic}}.geojson")
+        if a.site or not a.out_prefix:
+            from . import data_dir
+            loc = os.path.join(data_dir(), "localization", "maps", os.path.basename(out))
+            os.makedirs(os.path.dirname(loc), exist_ok=True)
+            nb, nr = _osm_localization().to_geojson(src, loc)
+            print(f"{nb} buildings, {nr} highway ways -> {loc}_{{buildings,roads}}.geojson (osm_localization)")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ models:
   lidarrv_mcd: mcd
   lidarrv_kitti360: kitti360
   cenet_kitti360: kitti360
+  cenet_mcd: mcd              # CU-Multi north campus (its class scores)
 
 # The localizer's building points, per label set: the ids that match OSM building outlines. A label
 # set not listed here uses every id it maps to "building" (MCD's shelters and KITTI-360's walls, bridges

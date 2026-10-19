@@ -2,3 +2,7 @@
 	path = third_party/nvblox
 	url = https://github.com/nvidia-isaac/nvblox.git
 	shallow = true
+[submodule "third_party/osm_localization"]
+	path = third_party/osm_localization
+	url = git@github.com:donceykong/osm_localization.git
+	branch = use_gtsam

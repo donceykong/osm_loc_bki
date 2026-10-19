@@ -18,6 +18,7 @@ os.environ.setdefault("GLOG_minloglevel", "1")
 _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if os.path.isdir(os.path.join(_root, "config")):
     os.environ.setdefault("OSMLOCBKI_ROOT", _root)
+    os.environ.setdefault("OSMLOC_ROOT", os.path.join(_root, "third_party", "osm_localization"))
 
 from ._osmlocbki import (  # noqa: E402
     Pipeline, Site, config_dir, data_dir, have_nvblox, label_mapping, segment_ground, sites)

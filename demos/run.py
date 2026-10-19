@@ -45,6 +45,10 @@ def main():
     ap.add_argument("--mapper", default="", choices=["", "cpu", "nvblox"],
                     help="map backend (default: config/mapping.yaml); nvblox: GPU voxel blocks with a TSDF")
     ap.add_argument("--mesh", help="save the nvblox TSDF mesh, coloured by class (ply)")
+    ap.add_argument("--loc-surface", action="store_true",
+                    help="osm_localization also registers against the site's airborne survey (its sites.yaml surface:)")
+    ap.add_argument("--lock-agree-m", type=float, default=2.0,
+                    help="map once rigid and graph agree within this (m); 0: once 100 m are behind")
     ap.add_argument("--view", default="2d", choices=["2d", "3d"], help="matplotlib (2d) or pyvista (3d) view")
     ap.add_argument("--show", default="", choices=["", "voxels", "mesh", "both"],
                     help="3d: what of the map to draw (default: the mesh with nvblox, else the voxels)")
@@ -54,7 +58,8 @@ def main():
 
     p = osmlocbki.Pipeline(a.site, a.seq, model=a.model, pose=a.pose, strength=a.strength, odometry=a.odometry,
                            scale_bias=a.scale_bias, yaw_rw=a.yaw_rw, max_kf=a.max_kf, map_spacing=a.map_spacing,
-                           building_ids=a.building_ids, surface=a.surface, mapper=a.mapper)
+                           building_ids=a.building_ids, surface=a.surface, mapper=a.mapper,
+                           loc_surface=a.loc_surface, lock_agree_m=a.lock_agree_m)
     output = "filtered" if a.pose == "filtered" else "lag" if a.pose == "lag" else "graph"
     view = None
     if not a.no_view or a.save:

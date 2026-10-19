@@ -48,7 +48,8 @@ def test_short_run_and_view():
         return
     import osmlocbki
     from osmlocbki.view import LiveView, evaluate
-    p = osmlocbki.Pipeline("kth", "kth_day_09", model="lidarrv_mcd", pose="filtered", max_kf=250)
+    # lock on the graph alone: over the first 250 keyframes osm_localization's rigid output trails it
+    p = osmlocbki.Pipeline("kth", "kth_day_09", model="lidarrv_mcd", pose="filtered", max_kf=250, lock_agree_m=0)
     view = LiveView(p, output="filtered", show=False)
     while p.step():
         if p.t % 50 == 0:
@@ -77,7 +78,8 @@ def test_nvblox_run_and_mesh():
     if not base or not os.path.isdir(os.path.join(base, "datasets/mcd/kth/kth_day_09/inferred_labels/lidarrv_mcd")):
         print("  skipped: needs $DATASET_PATH with MCD KTH and lidarrv_mcd labels")
         return
-    p = osmlocbki.Pipeline("kth", "kth_day_09", model="lidarrv_mcd", pose="filtered", max_kf=250, mapper="nvblox")
+    p = osmlocbki.Pipeline("kth", "kth_day_09", model="lidarrv_mcd", pose="filtered", max_kf=250, mapper="nvblox",
+                           lock_agree_m=0)
     while p.step():
         pass
     p.finish()

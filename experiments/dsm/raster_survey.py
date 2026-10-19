@@ -6,7 +6,8 @@ from DSM and DEM rasters, for sites whose survey comes as GeoTIFFs rather than L
         --dsm $DATASET_PATH/datasets/kitti360/geospatial/kitti360_DGM025-2026/kitti360_DOM1/merged_dsm.tif \\
         --dem $DATASET_PATH/datasets/kitti360/geospatial/kitti360_DGM025-2026/kitti360_DGM025/merged_dem.tif
 
-The rasters are cropped to the site's map_bbox (config/sites.yaml) plus a margin and resampled onto
+The rasters are cropped to the site's map_bbox (osm_localization's config/sites.yaml; a site without
+one takes that of a site sharing its map) plus a margin and resampled onto
 one grid (`res`): the DSM by nearest cell (keeps roof edges sharp), the DEM by the mean of its cells.
 The surveyed points are the DSM's surface, one point every `spacing` m (finer than the raster, so
 they fill the map's voxels), plus wall points down each edge where a building-like cell (`solid`:
@@ -35,9 +36,14 @@ CELL = 25.0  # m: the crop bins src/survey.cpp expects (Survey::kCell)
 
 def site_box(site, margin):
     """The site's map_bbox in its UTM zone, grown by margin: (epsg, x0, y0, x1, y1)."""
-    with open(os.path.join(ROOT, "config", "sites.yaml")) as f:
-        s = yaml.safe_load(f)[site]
-    (lat0, lon0), (lat1, lon1) = s["map_bbox"]
+    with open(os.path.join(ROOT, "third_party", "osm_localization", "config", "sites.yaml")) as f:
+        sites = yaml.safe_load(f)
+    s = sites[site]
+    box = s.get("map_bbox") or next((o["map_bbox"] for o in sites.values() if o.get("map") == s["map"] and o.get("map_bbox")),
+                                    None)
+    if box is None:
+        raise SystemExit(f"site {site}: no map_bbox, nor a site with map {s['map']} that has one")
+    (lat0, lon0), (lat1, lon1) = box
     zone = int(math.floor(((lon0 + lon1) / 2 + 180) / 6)) + 1
     epsg = (32600 if lat0 >= 0 else 32700) + zone
     utm = pyproj.Transformer.from_crs(4326, epsg, always_xy=True)

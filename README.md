@@ -2,12 +2,16 @@
 
 Global LiDAR localization against OpenStreetMap (no prior map, GPS or initial pose), and an OSM-BKI
 semantic map built online at the poses it finds. ROS-free: C++ core, Python for maps and the live view.
+The localization is [osm_localization](https://github.com/donceykong/osm_localization), a submodule
+(`third_party/osm_localization`, pinned, used unmodified): its sites, keyframes and localizer; this
+repository adds the mapping.
 
 ## Setup
 
 Run everything from the repository root.
 
 ```bash
+git submodule update --init third_party/osm_localization   # needs access to donceykong/osm_localization
 conda env create -f environment.yaml      # env "osmlocbki"; -n NAME for another name
 conda activate osmlocbki                  # (already have an env? activate it and run: pip install -e .)
 export DATASET_PATH=/path/to/disk         # the disk holding datasets/mcd/...
@@ -30,7 +34,7 @@ Pick `cuda-version` for your driver (`nvidia-smi`) and host compiler (CUDA 13.0 
 gcc 15). `-Ccmake.define.NVBLOX_SOURCE_DIR=PATH` uses another checkout, `...OSMLOCBKI_NVBLOX=OFF`
 skips it.
 
-Expected data (MCD KTH shown; other sites in `config/sites.yaml`):
+Expected data (MCD KTH shown; the sites are osm_localization's, `third_party/osm_localization/config/sites.yaml`):
 
 ```
 $DATASET_PATH/datasets/mcd/kth/
@@ -43,25 +47,27 @@ $DATASET_PATH/datasets/mcd/kth/
     gt_labels_terrain/<scan>.bin                        # ground truth, only for --eval
 ```
 
-Ground-truth-label sites (`kth_gt`, `tuhh`, `ntu_gt`) read `<seq>/gt_labels/` and take no `--model`.
-`cu_north_campus` (CU-Multi, sequence `robot1`) reads CENet's MCD-class labels from
-`robot1/inferred_labels/cenet_mcd/` and also takes no `--model`; its georeference is a fit to the
-robot's GPS (1.4 m median residual), so errors under ~1.5 m there are within the reference's noise.
-`kitti360` takes `--seq 2013_05_28_drive_0000_sync` and a model (`lidarrv_kitti360`, `lidarrv_mcd`);
-score it with `--eval gt_labels --label-set kitti360`. Its map is drive 0000's OSM extract (copy
-`map_0000.osm` to `data/maps/kitti360_0000.osm`, then `convert --site kitti360`); its `lidar:` entry
-sets the TSDF's range image for the HDL-64E. Its survey (`--surface auto`, `--ground dsm`) is built
-from the Karlsruhe DSM / DEM rasters by `experiments/dsm/raster_survey.py`.
+Ground-truth-label sites (`kth_gt`, `tuhh`, `ntu_gt`, `kitti360_gt`) read `<seq>/gt_labels/` and take
+no `--model`. `cu_north_campus` (CU-Multi, sequence `robot1`) takes `--model cenet_mcd` (CENet's class
+scores). `kitti360` takes `--seq 2013_05_28_drive_0000_sync` and a model (`lidarrv_kitti360`,
+`lidarrv_mcd`); score it with `--eval gt_labels --label-set kitti360`. Its map is drive 0000's OSM
+extract (`map_0000.osm` as `data/maps/k360_0000.osm`); its survey (`--surface auto`, `--ground dsm`)
+is built from the Karlsruhe DSM / DEM rasters by `experiments/dsm/raster_survey.py`.
 
-Maps for KTH, TUHH, NTU and CU are included. For a new site, add it to `config/sites.yaml`, then:
+Map GeoJSON for KTH, TUHH, NTU, CU and KITTI-360 drive 0000 are included (mapping's); osm_localization
+converts its own from the same OSM extracts. For a site's maps, put its extract at `data/maps/<map>.osm`
+(or fetch it), then convert it for both:
 
 ```bash
 python -m osmlocbki.osm fetch   --site SITE   # data/maps/<map>.osm
-python -m osmlocbki.osm convert --site SITE   # data/maps/<map>_{buildings,semantic}.geojson
+python -m osmlocbki.osm convert --site SITE   # data/maps/<map>_{buildings,semantic}.geojson, and
+                                              # data/localization/maps/<map>_{buildings,roads}.geojson
 ```
 
-The first run of a map or sequence builds and caches its database and descriptors in `data/`
-(minutes for a new map); delete `data/db_<map>_*.npz` after changing a map.
+The first run of a map or sequence builds and caches osm_localization's database and descriptors in
+`data/localization/` (minutes for a new map); delete `data/localization/db_<map>_*.npz` after changing
+a map. A site without a `map_bbox` there (`kth`) has its map's database built in the box of a site
+sharing the map (`kth_gt`): over the whole OSM extract it would not fit in memory.
 
 ## Run
 
@@ -112,7 +118,8 @@ p.mesh()        # nvblox: vertices, triangles, colours (map frame)
 
 ## Configuration
 
-- `config/sites.yaml`: datasets, their georeference and label set.
+- `config/sites.yaml`: what mapping adds to osm_localization's sites: the label set of a site's own
+  labels, the LiDAR's mounting where osm_localization does not list it, a LiDAR other than MCD's Ouster.
 - `config/labels.yaml`: the map's classes, and each label set's mapping onto them (`label_sets:`),
   its building ids for localization (`localization_buildings:`) and which models use it (`models:`).
   A new model only needs a `models:` entry.
@@ -140,20 +147,24 @@ cmake -S . -B build -G Ninja && cmake --build build
 python tests/test_python.py         # short KTH run when DATASET_PATH holds MCD KTH
 ```
 
-They check localization against the original Python/GTSAM outputs, the mapper voxel-for-voxel against
+They check .npz and UTM I/O, the mapper voxel-for-voxel against
 the original OSM-BKI code (`tests/reference/make_reference.sh` regenerates that reference), the nvblox
-backend against the CPU one (and its free-space mask), and TUHH day_03 end to end.
+backend against the CPU one (and its free-space mask), and TUHH day_03 end to end (localized by
+osm_localization, whose own tests cover its localizer).
 `GLOG_minloglevel=1` quiets nvblox's logging.
 
 ## How it works
 
-Every 1 m, the scan's building points form a range descriptor matched against descriptors ray-cast
-from OSM buildings; a rigid tracker, history check and sliding-window pose graph turn these matches
-plus odometry into poses (`rigid`, `graph`, `filtered`, and `lag`, settled 60 m later). Every 5 m,
-once the localizer is locked (100 m travelled and `rigid` agrees with `graph`), the scan is placed at
-its pose and inserted into a Bayesian kernel inference voxel map: each point deposits the network's
-class distribution, boosted toward the classes nearby OSM features support, gated by Patchwork++
-ground segmentation.
+Every 1 m, osm_localization matches the scan's building points against descriptors ray-cast from OSM
+buildings; its rigid tracker, history check and iSAM2 fixed-lag pose graph turn these matches plus
+odometry into poses (`rigid`, `graph`, `filtered`, and `lag`, settled 60 m later; `--loc-surface`
+adds its registration against the airborne survey). Every 5 m, once the localizer is locked (100 m
+travelled and `rigid` within `--lock-agree-m`, 2 m, of `graph`; 0 locks on the graph alone), a scan is
+placed and inserted into a Bayesian kernel inference voxel map: each point deposits the network's class
+distribution, boosted toward the classes nearby OSM features support, gated by Patchwork++ ground
+segmentation. The scans mapped are those the network exported class distributions for, which need not
+be keyframes: each is placed at the pose of the keyframe before it plus the ground-truth motion between
+them (under a metre, as odometry would give it).
 
 The nvblox backend keeps the same voxels in nvblox's GPU voxel blocks (the same evidence as the CPU
 map, up to float rounding) and integrates every mapped scan into an nvblox TSDF on the same grid. A
@@ -174,7 +185,7 @@ simulated drift); the first ~100 m are not mapped.
 
 ## Credits
 
-Descriptor and matching port the MATLAB of Y. Cho et al., "OpenStreetMap-Based LiDAR Global
+osm_localization's descriptor and matching port the MATLAB of Y. Cho et al., "OpenStreetMap-Based LiDAR Global
 Localization in Urban Environment Without a Prior LiDAR Map", RA-L 2022 (CC BY-NC-SA 4.0; derived
 code carries the same terms). BKI mapping after L. Gan et al., RA-L 2020. Patchwork++
 (`third_party/patchworkpp`, BSD-2), Urban Robotics Lab, KAIST. Map data © OpenStreetMap contributors

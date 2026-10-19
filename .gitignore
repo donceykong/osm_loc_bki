@@ -15,6 +15,7 @@ __pycache__/
 # generated data: databases, scan descriptors and raw OSM extracts are rebuilt / refetched
 data/*.npz
 data/maps/*.osm
+data/localization/
 
 # scratch configs and editor / OS files
 config/_tmp_*

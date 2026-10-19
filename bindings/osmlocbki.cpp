@@ -4,6 +4,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "osmloc/site.hpp"
 #include "osmlocbki/pipeline.hpp"
 
 namespace py = pybind11;
@@ -22,15 +23,18 @@ std::unique_ptr<Pipeline> make_pipeline(const std::string& site, const std::stri
                                         double scale_bias, double yaw_rw, unsigned seed, long max_kf, double spacing,
                                         double map_spacing, double lock_m, double lag_m, std::vector<int> building_ids,
                                         const std::string& mapping, const std::string& surface,
-                                        const std::string& mapper) {
+                                        const std::string& mapper, bool loc_surface, double lock_agree_m) {
   PipelineConfig c;
-  c.site = site, c.seq = seq, c.model = model, c.pose = pose, c.map = map, c.strength = strength;
+  osmloc::RunConfig& l = c.loc;
+  l.site = site, l.seq = seq, l.model = model;
   if (odometry != "near_exact" && odometry != "drifting") throw std::invalid_argument("odometry: near_exact or drifting");
-  c.graph = odometry == "drifting" ? GraphParams::drifting() : GraphParams();
-  c.odometry.scale_bias = scale_bias, c.odometry.yaw_rw = yaw_rw, c.odometry.seed = seed;
-  c.max_kf = max_kf, c.spacing = spacing, c.map_spacing = map_spacing, c.lock_m = lock_m, c.lag_m = lag_m;
-  c.building_ids = std::move(building_ids), c.mapping = mapping, c.surface = surface;
-  c.mapper = mapper;
+  l.graph = odometry == "drifting" ? osmloc::GraphParams::drifting() : osmloc::GraphParams();
+  l.odometry.scale_bias = scale_bias, l.odometry.yaw_rw = yaw_rw, l.odometry.seed = seed;
+  l.max_kf = max_kf, l.spacing = spacing, l.lag_m = lag_m, l.building_ids = std::move(building_ids);
+  l.surface = loc_surface;
+  c.pose = pose, c.map = map, c.strength = strength, c.map_spacing = map_spacing, c.lock_m = lock_m;
+  c.lock_agree_m = lock_agree_m;
+  c.mapping = mapping, c.surface = surface, c.mapper = mapper;
   return std::make_unique<Pipeline>(c);
 }
 
@@ -63,7 +67,7 @@ py::dict voxels(const Pipeline& p, std::optional<Box> box) {
 
 py::dict last_mapped(const Pipeline& p) {
   const MappedScan& s = p.last_mapped();
-  return py::dict(py::arg("t") = s.t, py::arg("scan_id") = s.scan_id, py::arg("xy") = s.xy, py::arg("psi") = s.psi,
+  return py::dict(py::arg("f") = s.f, py::arg("scan_id") = s.scan_id, py::arg("xy") = s.xy, py::arg("psi") = s.psi,
                   py::arg("points") = s.points, py::arg("cls") = py::array(py::cast(s.cls)));
 }
 
@@ -98,7 +102,7 @@ MatX2 hits(const Pipeline& p, long t) {
 PYBIND11_MODULE(_osmlocbki, m) {
   m.doc() = "Global localization against OpenStreetMap and OSM-BKI semantic mapping (C++)";
 
-  m.def("sites", &Site::names, "Site names in config/sites.yaml.");
+  m.def("sites", &Site::names, "Site names (osm_localization's config/sites.yaml).");
   m.def("have_nvblox", &have_nvblox, "Whether this build has the nvblox (GPU) map backend.");
   m.def("data_dir", &data_dir, "Where generated files go (data/ or $OSMLOCBKI_DATA).");
   m.def("config_dir", &config_dir, "The repository's config/.");
@@ -119,8 +123,8 @@ PYBIND11_MODULE(_osmlocbki, m) {
       .def(py::init(&Site::load), py::arg("name"))
       .def_readonly("name", &Site::name)
       .def_readonly("map", &Site::map)
-      .def_readonly("map_bbox", &Site::map_bbox)
-      .def("seq_dir", &Site::seq_dir, py::arg("seq"))
+      .def_property_readonly("map_bbox", [](const Site& s) { return s.loc().map_bbox; })
+      .def("seq_dir", [](const Site& s, const std::string& seq) { return s.loc().seq_dir(seq); }, py::arg("seq"))
       .def("label_set", &Site::label_set, py::arg("model") = "");
 
   py::class_<Pipeline>(m, "Pipeline")
@@ -129,36 +133,40 @@ PYBIND11_MODULE(_osmlocbki, m) {
            py::arg("scale_bias") = 0.0, py::arg("yaw_rw") = 0.0, py::arg("seed") = 1u, py::arg("max_kf") = 0,
            py::arg("spacing") = 1.0, py::arg("map_spacing") = 5.0, py::arg("lock_m") = 100.0, py::arg("lag_m") = 60.0,
            py::arg("building_ids") = std::vector<int>{}, py::arg("mapping") = "mapping.yaml", py::arg("surface") = "",
-           py::arg("mapper") = "",
-           "Localize a sequence keyframe by keyframe and map it with OSM-BKI (see pipeline.hpp).\n"
+           py::arg("mapper") = "", py::arg("loc_surface") = false, py::arg("lock_agree_m") = 2.0,
+           "Localize a sequence keyframe by keyframe (osm_localization) and map it with OSM-BKI (see pipeline.hpp).\n"
            "pose: lag | filtered | gt; strength: OSM strength (< 0: config/mapping.yaml's); odometry: near_exact or\n"
            "drifting graph preset, with simulated drift scale_bias (fraction) and yaw_rw (deg / sqrt(m)).\n"
            "surface: an airborne survey .npz projected into the map around each mapped pose ('auto':\n"
-           "data/surface/<map>_epsg<zone>.npz). mapper: cpu | nvblox (GPU, with a TSDF; '': config/mapping.yaml's).")
+           "data/surface/<map>_epsg<zone>.npz). mapper: cpu | nvblox (GPU, with a TSDF; '': config/mapping.yaml's).\n"
+           "loc_surface: osm_localization registers against the site's airborne survey (its sites.yaml surface:).")
       .def("step", &Pipeline::step, py::call_guard<py::gil_scoped_release>(),
            "Localize the next keyframe and map what is ready -> False when done.")
       .def("finish", &Pipeline::finish, py::call_guard<py::gil_scoped_release>(), "Settle the lag and map what it settles.")
       .def("status", &Pipeline::status)
-      .def_property_readonly("site", [](const Pipeline& p) { return p.config().site; })
-      .def_property_readonly("seq", [](const Pipeline& p) { return p.config().seq; })
+      .def_property_readonly("site", [](const Pipeline& p) { return p.config().loc.site; })
+      .def_property_readonly("seq", [](const Pipeline& p) { return p.config().loc.seq; })
       .def_property_readonly("map_origin", [](const Pipeline& p) { return p.semantic_map()->utm_origin(); },
                              "UTM of the map frame's origin.")
       .def_property_readonly("t", &Pipeline::t)
       .def_property_readonly("size", &Pipeline::size)
       .def_property_readonly("locked", &Pipeline::locked)
-      .def_property_readonly("gt", &Pipeline::gt, "The LiDAR's ground-truth positions, UTM (T, 2).")
+      .def_property_readonly("gt", &Pipeline::gt, "The keyframes' LiDAR ground-truth positions, UTM (T, 2).")
       .def_property_readonly("gt_psi", &Pipeline::gt_psi)
-      .def_property_readonly("scan_ids", [](const Pipeline& p) { return p.sequence().scan_ids; })
+      .def_property_readonly("scan_ids", &Pipeline::keyframe_ids, "The keyframes' scan ids.")
+      .def_property_readonly("frame_scan_ids", [](const Pipeline& p) { return p.frames().scan_id; },
+                             "The scan id of each frame (the scans placed off keyframes; mapped indexes them).")
       .def_property_readonly("dist", [](const Pipeline& p) { return p.localizer().buf().dist; },
                              "Odometry path length per localized keyframe.")
-      .def("trajectory", [](const Pipeline& p, const std::string& o) { return p.localizer().trajectory(output_of(o)); },
+      .def("trajectory", [](const Pipeline& p, const std::string& o) { return p.localizer().trajectory(o); },
            py::arg("output"), "(n, 2) UTM positions of rigid | graph | hybrid | lag (NaN until settled) | filtered.")
-      .def("heading", [](const Pipeline& p, const std::string& o) { return p.localizer().heading(output_of(o)); },
-           py::arg("output"))
+      .def("heading", [](const Pipeline& p, const std::string& o) { return p.localizer().heading(o); }, py::arg("output"))
       .def("hits", &hits, py::arg("t"), "Keyframe t's front-end hits (k, 2).")
-      .def_property_readonly("map_keyframes", &Pipeline::map_keyframes)
-      .def_property_readonly("mapped", &Pipeline::mapped)
-      .def("last_mapped", &last_mapped, "The last mapped scan: t, scan_id, xy, psi, points (map frame), cls.")
+      .def_property_readonly("map_frames", &Pipeline::map_frames, "The frames to map.")
+      .def_property_readonly("mapped", &Pipeline::mapped, "The frames mapped so far.")
+      .def_property_readonly("mapped_xy", [](const Pipeline& p) { return mat(p.mapped_xy()); },
+                             "Where each mapped scan was mapped, UTM (n, 2).")
+      .def("last_mapped", &last_mapped, "The last mapped scan: f (frame), scan_id, xy, psi, points (map frame), cls.")
       .def("voxels", &voxels, py::arg("box") = std::nullopt,
            "Voxels with evidence (within box = (xmin, ymin, xmax, ymax), map frame): xyz (map frame), cls, prob,\n"
            "mass, origin (UTM of the map frame).")
@@ -170,8 +178,8 @@ PYBIND11_MODULE(_osmlocbki, m) {
            py::arg("points"), "The class of the voxel holding each point (N, 3), map frame (0: free or unobserved).")
       .def("osm_support", &osm_support, py::arg("xy"), py::arg("ground"),
            "OSM's ground-gated support per class at UTM points (N, 2), ground verdicts (N,) -> (N, C).")
-      .def("classify_keyframe", &Pipeline::classify_keyframe, py::arg("t"),
-           "Keyframe t's scan at its ground-truth pose, classified by the map (one class per raw point).")
+      .def("classify_frame", &Pipeline::classify_frame, py::arg("f"),
+           "Frame f's scan at its ground-truth pose, classified by the map (one class per raw point).")
       .def("osm", &osm_layers, "The OSM map in UTM: buildings, holes, features [(class, area|line|point, (N, 2))].")
       .def("taxonomy", &taxonomy, "The common classes' names and colours.")
       .def("save_mesh",
