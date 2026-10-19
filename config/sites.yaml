@@ -9,6 +9,7 @@
 #   poses        pose file in the sequence folder ({seq} = sequence name) and its format:
 #                  csv      header with an id column (`id_col`), x, y, z, qx, qy, qz, w|qw
 #                  utm_csv  header-less timestamp, x, y, z, qx, qy, qz, qw; row i = scan i
+#                  kitti    KITTI-360: scan id, then the 4x4 pose row-major, space separated
 #   scans        scan folder in the sequence folder (float32 x, y, z, intensity)
 #   labels       per-point labels, one of
 #                  {flat: <dir in the sequence folder>, label_set: <config/labels.yaml label set>}
@@ -19,6 +20,8 @@
 #                     multiclass_alpha, those scans are mapped with its class distributions.
 #   lidar_to_body  {file, key}: lidar -> body extrinsic in a calibration yaml under data_dir, when
 #                the poses are of the body
+#   lidar        {azimuth, elevation, elevation_deg: [lo, hi]}: the LiDAR's range image for the TSDF,
+#                when it is not the Ouster OS1-128 config/mapping.yaml (nvblox:) describes
 #
 # The localizer's building points are the labels the label set maps to the common class "building"
 # (config/labels.yaml), so they follow whichever model's labels a run uses.
@@ -96,3 +99,16 @@ cu_north_campus:
   poses: {file: poses/poses_interpolated.csv, format: csv, id_col: "scan #"}
   scans: lidar_bin/data
   labels: {flat: inferred_labels/cenet_mcd, label_set: mcd}
+
+# KITTI-360 (sequences 2013_05_28_drive_<NNNN>_sync; the map is drive 0000's OSM extract), with a
+# segmentation network's labels (pass the model, e.g. lidarrv_kitti360 or lidarrv_mcd). The world
+# frame is KITTI-360's scaled Web-Mercator, exactly; the poses are of the Velodyne.
+kitti360:
+  data_dir: datasets/kitti360
+  map: kitti360_0000
+  map_bbox: [[49.0111, 8.4366], [49.0213, 8.4501]]
+  georef: {mercator: {origin: [48.9843445, 8.4295857], rel_pos: [0.0, 0.0]}}
+  poses: {file: velodyne_poses.txt, format: kitti}
+  scans: velodyne_points/data
+  labels: {model: int}
+  lidar: {azimuth: 1024, elevation: 64, elevation_deg: [-24.9, 2.0]}   # Velodyne HDL-64E

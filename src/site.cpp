@@ -128,6 +128,13 @@ std::string Site::root() const {
 
 std::string Site::seq_dir(const std::string& seq) const { return root() + "/" + seq; }
 std::string Site::map_prefix() const { return data_dir() + "/maps/" + map; }
+std::optional<LidarModel> Site::lidar() const {
+  const YAML::Node& c = (*cfg_)["lidar"];
+  if (!c) return std::nullopt;
+  return LidarModel{c["azimuth"].as<int>(), c["elevation"].as<int>(), c["elevation_deg"][0].as<double>(),
+                    c["elevation_deg"][1].as<double>()};
+}
+
 std::optional<Mat4> Site::lidar_to_body() const {
   const YAML::Node& c = (*cfg_)["lidar_to_body"];
   if (!c) return std::nullopt;
@@ -146,7 +153,21 @@ Poses Site::read_poses(const std::string& seq) const {
   std::string fmt = c["format"].as<std::string>();
   Poses P;
   std::vector<Vec3> p;
-  {
+  if (fmt == "kitti") {  // KITTI-360: scan id, then the 4x4 lidar -> world matrix row-major, space separated
+    std::ifstream f(path);
+    if (!f) throw std::runtime_error("cannot read " + path);
+    for (std::string line; std::getline(f, line);) {
+      std::istringstream s(line);
+      double id, m[16];
+      if (!(s >> id)) continue;
+      for (double& v : m) s >> v;
+      Eigen::Matrix3d R;
+      R << m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10];
+      P.ids.push_back(static_cast<long>(id));
+      p.emplace_back(m[3], m[7], m[11]);
+      P.q.emplace_back(Eigen::Quaterniond(R).normalized());
+    }
+  } else {
     std::ifstream f(path);
     if (!f) throw std::runtime_error("cannot read " + path);
     std::vector<std::string> head;

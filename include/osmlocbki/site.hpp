@@ -32,6 +32,12 @@ struct Poses {
   std::vector<Eigen::Quaterniond> q;
 };
 
+// the LiDAR's range image, for the TSDF (config/mapping.yaml nvblox: is MCD's Ouster)
+struct LidarModel {
+  int azimuth, elevation;
+  double min_elevation_deg, max_elevation_deg;
+};
+
 class Site {
  public:
   static std::vector<std::string> names();
@@ -45,6 +51,8 @@ class Site {
   std::string map_prefix() const;  // data/maps/<map>
   // lidar -> body extrinsic when the poses are of the body
   std::optional<Mat4> lidar_to_body() const;
+  // the site's own LiDAR, when it is not the one config/mapping.yaml describes
+  std::optional<LidarModel> lidar() const;
 
   Poses read_poses(const std::string& seq) const;
   // (lat, lon) of world positions

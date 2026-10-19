@@ -46,6 +46,10 @@ Ground-truth-label sites (`kth_gt`, `tuhh`, `ntu_gt`) read `<seq>/gt_labels/` an
 `cu_north_campus` (CU-Multi, sequence `robot1`) reads CENet's MCD-class labels from
 `robot1/inferred_labels/cenet_mcd/` and also takes no `--model`; its georeference is a fit to the
 robot's GPS (1.4 m median residual), so errors under ~1.5 m there are within the reference's noise.
+`kitti360` takes `--seq 2013_05_28_drive_0000_sync` and a model (`lidarrv_kitti360`, `lidarrv_mcd`);
+score it with `--eval gt_labels --label-set kitti360`. Its map is drive 0000's OSM extract (copy
+`map_0000.osm` to `data/maps/kitti360_0000.osm`, then `convert --site kitti360`); its `lidar:` entry
+sets the TSDF's range image for the HDL-64E.
 
 Maps for KTH, TUHH, NTU and CU are included. For a new site, add it to `config/sites.yaml`, then:
 

@@ -149,7 +149,7 @@ def evaluate(pipe, labels_dir, label_set="mcd", keyframes=None):
     """The map against ground-truth labels: each mapped keyframe's scan at its ground-truth pose,
     classified by the map, against <seq>/<labels_dir>/<scan>.bin (int32, in `label_set`).
     -> (per-class IoU over the common classes 1.., mIoU, accuracy); points the map left unlabeled
-    count as misses."""
+    count as misses; scans without a label file (KITTI-360 leaves a few out) are skipped."""
     from . import Site, label_mapping
     site = Site(pipe.site)
     lut = np.array(label_mapping(label_set))
@@ -157,7 +157,10 @@ def evaluate(pipe, labels_dir, label_set="mcd", keyframes=None):
     conf = np.zeros((n, n), dtype=np.int64)
     for t in pipe.mapped if keyframes is None else keyframes:
         sid = pipe.scan_ids[t]
-        gt = np.fromfile(os.path.join(site.seq_dir(pipe.seq), labels_dir, f"{sid:010d}.bin"), dtype=np.int32)
+        path = os.path.join(site.seq_dir(pipe.seq), labels_dir, f"{sid:010d}.bin")
+        if not os.path.exists(path):
+            continue
+        gt = np.fromfile(path, dtype=np.int32)
         gt = np.where((gt >= 0) & (gt < len(lut)), lut[np.clip(gt, 0, len(lut) - 1)], 0)
         pred = np.asarray(pipe.classify_keyframe(t))
         k = gt > 0

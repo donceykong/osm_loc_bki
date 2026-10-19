@@ -74,6 +74,11 @@ Pipeline::Pipeline(const PipelineConfig& c) : c_(c), site_(Site::load(c.site)) {
     read(v, "unified_memory", nv.unified_memory);
     if (v["elevation_deg"]) nv.min_elevation_deg = v["elevation_deg"][0].as<double>(), nv.max_elevation_deg = v["elevation_deg"][1].as<double>();
   }
+  if (auto l = site_.lidar()) {
+    NvbloxParams& nv = mp.nvblox;
+    nv.azimuth = l->azimuth, nv.elevation = l->elevation;
+    nv.min_elevation_deg = l->min_elevation_deg, nv.max_elevation_deg = l->max_elevation_deg;
+  }
   OsmParams op;
   read(o, "decay_m", op.decay_m);
   if (o && o["widths"])
