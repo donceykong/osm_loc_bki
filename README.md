@@ -80,9 +80,9 @@ python demos/run.py --site tuhh --seq tuhh_day_03 --odometry drifting --scale-bi
 The view shows OSM, ground truth, the estimate and the last mapped scan (left), and the semantic map
 from above with OSM building outlines (right). Close it to stop. `--view 3d` (needs `pyvista`, in
 `environment.yaml`) draws the OSM map draped over the ground (the site's survey terrain where there is
-one), ground truth, the estimate, the robot and its hits, and the map as it grows, the camera
-following the robot: drag and scroll to change its angle and zoom; `v` / `m` / `s` toggle the voxels,
-the mesh and the last scan; the window stays open at the end.
+one, or with `--ground dsm` its surface: roofs and canopy), ground truth, the estimate, the robot and its hits, and the map as it grows, the camera
+following the robot: drag and scroll to change its angle and zoom; `v` / `m` / `s` / `g` toggle the
+voxels, the mesh, the last scan and the ground (DEM / DSM); the window stays open at the end.
 
 ```bash
 python demos/run.py --site kth --seq kth_day_09 --model lidarrv_mcd --mapper nvblox --view 3d

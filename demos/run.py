@@ -6,8 +6,8 @@
     python demos/run.py ... --mapper nvblox --view 3d                            # 3D: voxels and mesh
 
 Needs $DATASET_PATH (the disk holding datasets/...). Close the window to stop. In the 3D view, drag and
-scroll to change the angle and zoom (the camera keeps following), v / m / s toggle the voxels, the mesh
-and the last scan; at the end the window stays open to look around.
+scroll to change the angle and zoom (the camera keeps following), v / m / s / g toggle the voxels, the mesh,
+the last scan and the ground (DEM / DSM); at the end the window stays open to look around.
 """
 
 import argparse
@@ -47,6 +47,8 @@ def main():
     ap.add_argument("--view", default="2d", choices=["2d", "3d"], help="matplotlib (2d) or pyvista (3d) view")
     ap.add_argument("--show", default="", choices=["", "voxels", "mesh", "both"],
                     help="3d: what of the map to draw (default: the mesh with nvblox, else the voxels)")
+    ap.add_argument("--ground", default="dem", choices=["dem", "dsm"],
+                    help="3d: the OSM draped over the survey's terrain (dem) or its surface, roofs and canopy (dsm)")
     a = ap.parse_args()
 
     p = osmlocbki.Pipeline(a.site, a.seq, model=a.model, pose=a.pose, strength=a.strength, odometry=a.odometry,
@@ -58,7 +60,8 @@ def main():
         if a.view == "3d":
             from osmlocbki.view3d import LiveView3D
             show = {"": (None, None), "voxels": (True, False), "mesh": (False, True), "both": (True, True)}[a.show]
-            view = LiveView3D(p, output=output, show=not a.no_view, voxels=show[0], mesh=show[1])
+            view = LiveView3D(p, output=output, show=not a.no_view, voxels=show[0], mesh=show[1],
+                              ground=a.ground)
         else:
             view = LiveView(p, output=output, show=not a.no_view)
     t0, n_mapped = time.time(), 0

@@ -3,10 +3,11 @@ estimate, the robot and its front-end hits, and the semantic map as it grows: it
 each, class colours) and, with the nvblox backend, its TSDF mesh coloured by class. The camera
 follows the robot and keeps whatever angle and zoom you give it (drag, scroll).
 
-Keys: v toggles the voxels, m the mesh, s the last mapped scan.
+Keys: v toggles the voxels, m the mesh, s the last mapped scan, g the ground (DEM <-> DSM).
 
-The ground is the site's airborne survey (DEM, data/surface/<map>_epsg<zone>.npz) where there is one,
-lifted onto the map's heights, else a plane under the first mapped scan. Everything is drawn in the
+The ground is the site's airborne survey (data/surface/<map>_epsg<zone>.npz) where there is one,
+lifted onto the map's heights: its terrain (DEM), or its surface (DSM: roofs, canopy) with the OSM
+draped over it; else a plane under the first mapped scan. Everything is drawn in the
 map frame (UTM - map origin).
 """
 
@@ -32,15 +33,16 @@ def rgb1(c):
 
 
 class Ground:
-    """Terrain height in the map frame: the survey's DEM where the site has one, else a plane."""
+    """Terrain height in the map frame: the survey's DEM where the site has one, else a plane. surface()
+    gives the DSM's heights instead (the DEM's where the DSM has none)."""
 
     def __init__(self, pipe):
-        self.p, self.dem = pipe, None
+        self.p, self.dem, self.dsm = pipe, None, None
         site = Site(pipe.site)
         hits = sorted(glob.glob(os.path.join(data_dir(), "surface", f"{site.map}_epsg*.npz")))
         if hits:
             with np.load(hits[0]) as z:
-                self.dem, self.res = z["dem"], float(z["res"])
+                self.dem, self.dsm, self.res = z["dem"], z["dsm"], float(z["res"])
                 self.lo = z["origin"] - pipe.map_origin  # the DEM's corner in the map frame
         self.z0 = None  # plane height / datum shift, from the first mapped scan
         self.fallback = 0.0  # off the survey
@@ -62,12 +64,20 @@ class Ground:
             z = self._dem(pts[:, :2])
             self.fallback = float(np.nanmedian(z) + off) if np.isfinite(z).any() else float(low)
 
-    def _dem(self, xy):
+    def _dem(self, xy, grid=None):
+        grid = self.dem if grid is None else grid
         ij = np.floor((xy - self.lo) / self.res).astype(int)
         ok = (ij >= 0).all(1) & (ij[:, 0] < self.dem.shape[0]) & (ij[:, 1] < self.dem.shape[1])
         out = np.full(len(xy), np.nan, np.float32)
-        out[ok] = self.dem[ij[ok, 0], ij[ok, 1]]
+        out[ok] = grid[ij[ok, 0], ij[ok, 1]]
         return out
+
+    def surface(self, xy):
+        z = self(xy)
+        if self.dsm is not None:
+            s = self._dem(np.atleast_2d(xy), self.dsm) + self.z0
+            z = np.where(np.isfinite(s), np.maximum(s, z), z)
+        return z
 
     def __call__(self, xy):
         xy = np.atleast_2d(xy)
@@ -102,8 +112,8 @@ def osm_texture(osm, origin, lo, hi, res):
 class LiveView3D:
     """Same use as view.LiveView: update() after steps, update(final=True) at the end, save(png)."""
 
-    def __init__(self, pipe, output="lag", show=True, voxels=None, mesh=None, mesh_every=4, point_size=3.0,
-                 cam_dist=160.0, width=1600, height=1000):
+    def __init__(self, pipe, output="lag", show=True, voxels=None, mesh=None, ground="dem", mesh_every=4,
+                 point_size=3.0, cam_dist=160.0, width=1600, height=1000):
         import pyvista as pv
         self.pv, self.p, self.output = pv, pipe, output
         self.has_mesh = pipe.mapper == "nvblox"
@@ -114,6 +124,10 @@ class LiveView3D:
         self.names, self.colors = tax["names"], np.asarray(tax["colors"], np.uint8)
         self.origin = np.asarray(pipe.map_origin)
         self.ground = Ground(pipe)
+        self.dsm = ground == "dsm" and self.ground.dsm is not None
+        if ground == "dsm" and self.ground.dsm is None:
+            print(f"no survey DSM for {pipe.site}: the ground is a plane")
+        self.texture = None
         self.n_mapped, self.n_meshed, self.tiles, self.closed = 0, 0, set(), False
         gt = np.asarray(pipe.gt) - self.origin
         self.lo, self.hi = gt.min(0) - 150, gt.max(0) + 150
@@ -129,7 +143,7 @@ class LiveView3D:
         self.gt_dot = pl.add_mesh(pv.Sphere(radius=0.7), color=rgb1(GT))
         p0 = np.r_[gt[0], 0.0]
         pl.camera_position = [tuple(p0 + np.array([-0.45, -0.55, 0.7]) * cam_dist), tuple(p0), (0, 0, 1)]
-        for key, attr in (("v", "show_voxels"), ("m", "show_mesh"), ("s", "show_scan")):
+        for key, attr in (("v", "show_voxels"), ("m", "show_mesh"), ("s", "show_scan"), ("g", "dsm")):
             pl.add_key_event(key, lambda a=attr: self._toggle(a))
         if show:
             pl.show(interactive_update=True, auto_close=False)
@@ -140,7 +154,11 @@ class LiveView3D:
         setattr(self, attr, not getattr(self, attr))
         if attr == "show_mesh" and not self.has_mesh:
             self.show_mesh = False
-        if attr == "show_voxels":
+        if attr == "dsm":
+            self.dsm = self.dsm and self.ground.dsm is not None
+            if self.ground.ready():
+                self._draw_ground()
+        elif attr == "show_voxels":
             if self.show_voxels:
                 self._voxels(None)
             else:
@@ -158,15 +176,18 @@ class LiveView3D:
 
     def _draw_ground(self):
         pv, g = self.pv, self.ground
-        step = 2.0
+        step = 1.0 if self.dsm else 2.0  # the DSM's buildings want the finer grid
         gx, gy = np.arange(self.lo[0], self.hi[0] + step, step), np.arange(self.lo[1], self.hi[1] + step, step)
         X, Y = np.meshgrid(gx, gy, indexing="ij")
         xy = np.c_[X.ravel(), Y.ravel()]
-        Z = g(xy).reshape(X.shape) - 0.3  # under the mapped ground
+        Z = (g.surface(xy) if self.dsm else g(xy)).reshape(X.shape) - 0.3  # under the mapped ground
         surf = pv.StructuredGrid(X, Y, Z)
         surf.active_texture_coordinates = (surf.points[:, :2] - self.lo) / (self.hi - self.lo)
-        tex = pv.Texture(osm_texture(self.p.osm(), self.origin, self.lo, self.hi, 0.5))
-        self.pl.add_mesh(surf, texture=tex, lighting=False, name="ground", reset_camera=False)
+        if self.texture is None:
+            self.texture = pv.Texture(osm_texture(self.p.osm(), self.origin, self.lo, self.hi, 0.5))
+        # the DSM is lit, so its walls and roofs read as shapes; the flat DEM is drawn as is
+        self.pl.add_mesh(surf, texture=self.texture, lighting=self.dsm, ambient=0.55, diffuse=0.6, name="ground",
+                         reset_camera=False)
 
     def _path(self, xy, dz, color, name):
         ok = np.isfinite(xy[:, 0])
